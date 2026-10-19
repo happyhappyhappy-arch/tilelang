@@ -368,8 +368,13 @@ private:
                             .as<Map<Buffer, Layout>>()
                             .value();
       for (auto [buffer, layout] : layout_map) {
-        buffer_remap_.Set(buffer,
-                          makeBufferWithLayout(buffer, layout, var_remap_));
+        // Inference publishes the same map on enclosing and VF blocks. Reuse
+        // its physical Buffer so earlier accesses/regions and the eventual
+        // allocation keep a single identity across sibling blocks.
+        auto previous = layout_map_.Get(buffer);
+        if (!previous.has_value() || !previous.value()->IsEqual(layout.get()))
+          buffer_remap_.Set(buffer,
+                            makeBufferWithLayout(buffer, layout, var_remap_));
         layout_map_.Set(buffer, layout);
       }
     }
@@ -388,6 +393,22 @@ private:
 
     auto block = Downcast<SBlock>(arith::IRMutatorWithAnalyzer::VisitStmt_(op));
     auto block_ptr = block.CopyOnWrite();
+    // Layout materialization changes allocation identity and can change rank.
+    // A logical rectangle may map to holes (padding) or a nonrectangular XOR
+    // image. Keep explicit block effects on the same physical Buffer as the
+    // rewritten accesses, using a conservative cover rather than attempting an
+    // inverse of a storage layout. This metadata adds no executed accesses.
+    auto remap_region = [&](const BufferRegion &region) {
+      auto remapped = buffer_remap_.Get(region->buffer);
+      if (!remapped.has_value())
+        return region;
+      Array<Range> ranges;
+      for (const auto &extent : remapped.value()->shape)
+        ranges.push_back(Range::FromMinExtent(0, extent));
+      return BufferRegion(remapped.value(), ranges);
+    };
+    block_ptr->reads = block->reads.Map(remap_region);
+    block_ptr->writes = block->writes.Map(remap_region);
     block_ptr->annotations.erase(kL0SFBindings);
     // MX scale-factor handles (shared.l0a.sf/.l0b.sf) never materialize
     // storage: the scale-load lowering above resolved every access into a

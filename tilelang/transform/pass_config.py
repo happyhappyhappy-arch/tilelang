@@ -76,6 +76,48 @@ class PassConfigKey(str, Enum):
     TL_ENABLE_AUTO_SCHEDULE = "tl.enable_auto_schedule"
     """Enable Ascend auto scheduling. Default: True."""
 
+    TL_ASCEND_UB_LAYOUT_STRATEGY = "tl.ascend.ub_layout_strategy"
+    """Mutually exclusive physical UB strategy: off (default), padding, swizzle.
+
+    padding inserts periodic holes; swizzle folds row bits into virtual-group
+    bits while preserving f32 pairs. Neither selects parameters by a cost model.
+    Only eligible internal 2D f32 buffers on plain DAV-3510 SIMT are rewritten.
+    The caller selects the strategy manually. No warp-request profitability
+    check or automatic strategy selection is performed; performance can regress.
+    Ownership is controlled independently by TL_ASCEND_UB_LAYOUT_OWNERSHIP.
+    """
+
+    TL_ASCEND_UB_LAYOUT_OWNERSHIP = "tl.ascend.ub_layout_ownership"
+    """Enable the independent ownership width cap (default: False).
+
+    Can be combined with off, padding or swizzle. Normal layout inference runs
+    even when this option is False; enabling it guarantees neither applicability
+    nor performance improvement, and is not required before a storage strategy.
+    """
+
+    TL_ASCEND_UB_LAYOUT_OWNERSHIP_WIDTH = "tl.ascend.ub_layout_ownership_width"
+    """Positive power-of-two ownership grouping cap (default: 1)."""
+
+    TL_ASCEND_UB_LAYOUT_PADDING_DELTA = "tl.ascend.ub_layout_padding_delta"
+    """Positive gap size in f32 elements per period (default: 2).
+
+    Current rewriting requires an even logical row and even delta to preserve
+    f32 pair alignment; unsupported sites are left unchanged.
+    """
+
+    TL_ASCEND_UB_LAYOUT_PADDING_PERIOD = "tl.ascend.ub_layout_padding_period"
+    """Positive power-of-two coordinate period (default: 16).
+
+    No gap is inserted if the selected axis fits in one period. Column padding
+    requires period >= 2 to avoid splitting f32 pairs.
+    """
+
+    TL_ASCEND_UB_LAYOUT_PADDING_AXIS = "tl.ascend.ub_layout_padding_axis"
+    """Periodic padding axis: 0 for rows (default), 1 for columns.
+
+    Column padding also grows the physical row pitch to prevent row aliasing.
+    """
+
     TL_ENABLE_AUTO_WARP_SPECIALIZATION = "tl.enable_auto_warp_specialization"
     """Name of the automatic warp-specialization scheduler to run (e.g.
     "role_based"). Default: unset (disabled)."""
