@@ -28,6 +28,7 @@
 
 #include "arith/ir_mutator_with_analyzer.h"
 #include "arith/ir_visitor_with_analyzer.h"
+#include "ascend/layout/ascend_layouts.h"
 #include "ascend/op/builtin.h"
 #include "ascend/op/utils.h"
 #include "ascend/transform/vf_regions.h"
@@ -2361,15 +2362,286 @@ private:
   }
 };
 
+namespace {
+// ---------------------------------------------------------------------------
+// Manual UB layout options and original user constraints
+// ---------------------------------------------------------------------------
+
+struct UbLayoutOptions {
+  enum Strategy { kOff, kPadding, kSwizzle } strategy{kOff};
+  int delta{2};
+  int period{16};
+  int axis{0};
+};
+
+using UbProtectedData = std::unordered_set<const tirx::VarNode *>;
+
+UbLayoutOptions ReadUbLayoutOptions(const tvm::transform::PassContext &ctx,
+                                    const Target &target) {
+  UbLayoutOptions options;
+  String strategy = ctx->GetConfig<String>(kUbLayoutStrategy).value_or("off");
+  if (strategy == "off")
+    options.strategy = UbLayoutOptions::kOff;
+  else if (strategy == "padding")
+    options.strategy = UbLayoutOptions::kPadding;
+  else if (strategy == "swizzle")
+    options.strategy = UbLayoutOptions::kSwizzle;
+  else
+    TVM_FFI_THROW(ValueError)
+        << "Unknown tl.ascend.ub_layout_strategy: " << strategy;
+  int64_t delta = ctx->GetConfig<Integer>(kUbLayoutPaddingDelta)
+                      .value_or(Integer(2))
+                      ->value;
+  int64_t period = ctx->GetConfig<Integer>(kUbLayoutPaddingPeriod)
+                       .value_or(Integer(16))
+                       ->value;
+  int64_t axis =
+      ctx->GetConfig<Integer>(kUbLayoutPaddingAxis).value_or(Integer(0))->value;
+  if (delta <= 0 || delta > std::numeric_limits<int>::max())
+    TVM_FFI_THROW(ValueError) << "UB padding delta must be a positive int32";
+  if (period <= 0 || period > std::numeric_limits<int>::max() ||
+      (period & (period - 1)))
+    TVM_FFI_THROW(ValueError)
+        << "UB padding period must be a positive power of two fitting int32";
+  if (axis != 0 && axis != 1)
+    TVM_FFI_THROW(ValueError)
+        << "UB padding axis must be 0 (row) or 1 (column)";
+  options.delta = static_cast<int>(delta);
+  options.period = static_cast<int>(period);
+  options.axis = static_cast<int>(axis);
+  // Ascend dispatch selects DAV-3510. Physical storage rewriting remains
+  // disabled for PTO; automatic ownership inference is independent of it.
+  for (const auto &key : target->keys) {
+    if (key == "pto") {
+      options.strategy = UbLayoutOptions::kOff;
+      break;
+    }
+  }
+  return options;
+}
+
+UbProtectedData CollectUbUserLayouts(const Stmt &body) {
+  UbProtectedData result;
+  PostOrderVisit(body, [&](const ObjectRef &node) {
+    if (auto block = node.as<SBlockNode>()) {
+      if (auto value = block->annotations.Get(attr::kLayoutMap)) {
+        for (const auto &[var, layout] : value.value().cast<Map<Var, Layout>>())
+          result.insert(var.get());
+      }
+    }
+  });
+  return result;
+}
+
+// Uses are collected before selecting any plan. In particular a pointer, view,
+// DMA or unsupported annotation discovered after a load disqualifies storage.
+class StorageUses : public arith::IRVisitorWithAnalyzer {
+public:
+  Map<Var, Buffer> owners;
+  std::unordered_map<const VarNode *, std::unordered_set<const BufferNode *>>
+      aliases;
+  UbProtectedData blocked, read, written;
+
+  void Metadata(const Any &value) {
+    if (auto buf = value.as<Buffer>()) {
+      blocked.insert(buf.value()->data.get());
+    } else if (auto expr = value.as<PrimExpr>()) {
+      int old = opaque_;
+      opaque_++;
+      VisitExpr(expr.value());
+      opaque_ = old;
+    } else if (auto region = value.as<BufferRegion>()) {
+      blocked.insert(region.value()->buffer->data.get());
+    } else if (auto array = value.as<Array<Any>>()) {
+      for (const auto &item : array.value())
+        Metadata(item);
+    } else if (auto map = value.as<Map<Any, Any>>()) {
+      for (const auto &[key, item] : map.value()) {
+        Metadata(key);
+        Metadata(item);
+      }
+    }
+  }
+
+private:
+  bool simt_{false};
+  int opaque_{0};
+  void VisitBufferDef(const Buffer &buffer, bool alloc_data) final {
+    aliases[buffer->data.get()].insert(buffer.get());
+    if (alloc_data)
+      owners.Set(buffer->data, buffer);
+    IRVisitorWithAnalyzer::VisitBufferDef(buffer, alloc_data);
+  }
+  void VisitBufferUse(const Buffer &buffer) final {
+    aliases[buffer->data.get()].insert(buffer.get());
+  }
+  void VisitExpr_(const VarNode *op) final {
+    // TODO(ub-storage): model access_ptr/address_of users by their declared
+    // region and alignment, then lower through the selected Layout. A raw
+    // pointer escape has no index map that Forward can rewrite today.
+    blocked.insert(op);
+  }
+  void VisitStmt_(const AttrStmtNode *op) final {
+    Metadata(op->node);
+    IRVisitorWithAnalyzer::VisitStmt_(op);
+  }
+  void VisitStmt_(const ForNode *op) final {
+    for (const auto &[key, value] : op->annotations)
+      Metadata(value);
+    // Explicit vector loops may require wider alignment than the inferred
+    // native f32 pair. They are outside this storage transform's contract.
+    // TODO(ub-storage): prove that each vector's mapped lanes stay contiguous
+    // and aligned, or scalarize it before re-vectorizing the physical accesses.
+    bool vectorized = op->kind == ForKind::kVectorized;
+    opaque_ += vectorized;
+    IRVisitorWithAnalyzer::VisitStmt_(op);
+    opaque_ -= vectorized;
+  }
+  void VisitStmt_(const SBlockNode *op) final {
+    bool previous = simt_;
+    if (op->name_hint == "SIMT_VF")
+      simt_ = true;
+    if (op->name_hint == "SIMD_VF")
+      simt_ = false;
+    for (const auto &match : op->match_buffers) {
+      blocked.insert(match->buffer->data.get());
+      blocked.insert(match->source->buffer->data.get());
+    }
+    for (const auto &[key, value] : op->annotations) {
+      // Original user layouts are protected by CollectUbUserLayouts. The
+      // solved Buffer layouts are checked separately before selecting storage.
+      if (key != attr::kLayoutMap && key != "tl.buffer_versions_map" &&
+          key != "tl.buffer_version_mode") {
+        Metadata(value);
+      }
+      // Version overrides are keyed by the unchanged logical data Var. Existing
+      // versioning and lowering carry the selected Layout to physical storage.
+    }
+    IRVisitorWithAnalyzer::VisitStmt_(op);
+    simt_ = previous;
+  }
+  void Access(const Buffer &buffer, const Array<PrimExpr> &indices,
+              bool store) {
+    VisitBufferUse(buffer);
+    auto data = buffer->data.get();
+    (store ? written : read).insert(data);
+    if (!simt_ || opaque_ || indices.size() != buffer->shape.size()) {
+      blocked.insert(data);
+      return;
+    }
+    // Bounds and scalar f32 accesses establish element alignment. Vectorization
+    // downstream sees the new pitch/mapping and must re-prove wider alignment.
+    for (size_t i = 0; i < indices.size(); ++i) {
+      if (indices[i].dtype().lanes() != 1 ||
+          !analyzer_.CanProve(indices[i] >= 0 && indices[i] < buffer->shape[i]))
+        blocked.insert(data);
+    }
+  }
+  void VisitExpr_(const BufferLoadNode *op) final {
+    Access(op->buffer, op->indices, false);
+    IRVisitorWithAnalyzer::VisitExpr_(op);
+  }
+  void VisitStmt_(const BufferStoreNode *op) final {
+    Access(op->buffer, op->indices, true);
+    IRVisitorWithAnalyzer::VisitStmt_(op);
+  }
+  void VisitExpr_(const CallNode *op) final {
+    // TODO(ub-storage): distinguish transparent elementwise calls from DMA and
+    // opaque users. DMA needs a layout-aware copy descriptor (or a conversion
+    // buffer); an extern receiving a UB pointer needs an explicit access-map
+    // contract. Treating either as ordinary scalar loads would be incorrect.
+    ++opaque_;
+    for (const auto &[key, value] : op->annotations)
+      Metadata(value);
+    IRVisitorWithAnalyzer::VisitExpr_(op);
+    --opaque_;
+  }
+};
+
+// Select storage layouts after logical ownership is solved, before inference
+// annotations are written. AscendLowerTileOp materializes the layouts through
+// OutputShape/Forward; this helper leaves Buffer identities and accesses
+// intact.
+LayoutMap InferUbStorageLayouts(const PrimFunc &f,
+                                const UbLayoutOptions &options,
+                                const UbProtectedData &user_layouts,
+                                const LayoutMap &inferred_layouts) {
+  LayoutMap layouts;
+  if (options.strategy != UbLayoutOptions::kPadding &&
+      options.strategy != UbLayoutOptions::kSwizzle)
+    return layouts;
+  StorageUses uses;
+  uses.blocked = user_layouts;
+  for (const auto &[var, buffer] : f->buffer_map)
+    uses.blocked.insert(buffer->data.get());
+  if (f->attrs.defined())
+    for (const auto &[key, value] : f->attrs->dict)
+      uses.Metadata(value);
+  for (const auto &[buffer, layout] : inferred_layouts) {
+    uses.aliases[buffer->data.get()].insert(buffer.get());
+    if (!layout->IsEqual(MakeLinearLayout(buffer->shape).get()))
+      uses.blocked.insert(buffer->data.get());
+  }
+  uses(f->body);
+  arith::Analyzer analyzer;
+  for (const auto &[data, buffer] : uses.owners) {
+    if (buffer.scope() != "shared" && buffer.scope() != "shared.dyn")
+      continue;
+    // Explicit compact strides describe the same storage as omitted strides.
+    // TODO(ub-storage): compose arbitrary pitches and elem_offset with the
+    // strategy's physical address map, and derive consistent layouts for all
+    // alias views via the existing storage-bit reshape machinery. Preserve
+    // the allocation span and vector alignment of every view during lowering.
+    bool compact = true;
+    PrimExpr stride = 1;
+    for (int i = static_cast<int>(buffer->shape.size()) - 1; i >= 0; --i) {
+      if (!buffer->strides.empty())
+        compact &= analyzer.CanProveEqual(buffer->strides[i], stride);
+      stride = stride * buffer->shape[i];
+    }
+    // owners are allocations in the PrimFunc / enclosing blocks, not
+    // allocations inside SIMT_VF. StorageUses checks the scope of each access.
+    // TODO(ub-storage): parameterize the 8-byte atom in element units for other
+    // dtypes and lift 2D maps to higher-rank slices; the present f32 formulas
+    // deliberately preserve aligned pairs and must not be copied verbatim.
+    if (uses.blocked.count(data.get()) ||
+        uses.aliases[data.get()].size() != 1 || !uses.read.count(data.get()) ||
+        !uses.written.count(data.get()) || buffer->shape.size() != 2 ||
+        buffer->dtype != DataType::Float(32) || !compact ||
+        !is_zero(buffer->elem_offset)) {
+      DLOG(INFO) << "[UB layout] skip " << buffer->name
+                 << ": unsupported use/storage";
+      continue;
+    }
+    auto plan = options.strategy == UbLayoutOptions::kPadding
+                    ? TryMakeAscendUbPaddingLayout(buffer, options.delta,
+                                                   options.period, options.axis)
+                    : TryMakeAscendUbSwizzleLayout(buffer);
+    if (plan) {
+      DLOG(INFO) << "[UB layout] transform " << buffer->name;
+      layouts.Set(buffer, *plan);
+    }
+  }
+  return layouts;
+}
+} // namespace
+
 class LayoutInferencer : public IRMutatorWithAnalyzer {
 public:
-  static PrimFunc Substitute(PrimFunc f) {
+  static PrimFunc Substitute(PrimFunc f, const UbLayoutOptions &ub_options,
+                             const UbProtectedData &user_layouts) {
     arith::Analyzer analyzer;
     PrimFuncNode *fptr = f.CopyOnWrite();
     fptr->body = ParallelLoopFuserSkipSimdVF::Fuse(f->body);
     BufferUseDefCollector collector;
     collector.Collect(f);
     auto result = collector.Run();
+    // Storage strategies preserve the solved logical ownership. Publish their
+    // hardware-specific address maps through the same LayoutMap as other
+    // inferred layouts; AscendLowerTileOp owns allocation/access rewriting.
+    for (const auto &[buffer, layout] :
+         InferUbStorageLayouts(f, ub_options, user_layouts, result.layout_map))
+      result.layout_map.Set(buffer, layout);
     LayoutInferencer substituter(result, &analyzer);
     fptr->body = substituter.VisitStmt(f->body);
     return f;
@@ -2463,7 +2735,12 @@ private:
 tvm::transform::Pass AscendLayoutInference() {
   using namespace tirx::transform;
   auto pass_func = [=](PrimFunc f, const IRModule &m, const PassContext &ctx) {
-    f = LayoutInferencer::Substitute(std::move(f));
+    auto options = ReadUbLayoutOptions(
+        ctx, f->GetAttr<Target>(tvm::attr::kTarget).value());
+    auto user_layouts = options.strategy == UbLayoutOptions::kOff
+                            ? UbProtectedData{}
+                            : CollectUbUserLayouts(f->body);
+    f = LayoutInferencer::Substitute(std::move(f), options, user_layouts);
     // Validate parallel loop layout annotations
     AscendParallelLoopLayoutValidator::Validate(f->body);
     return f;

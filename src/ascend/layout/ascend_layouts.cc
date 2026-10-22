@@ -1,11 +1,12 @@
 /*!
  * \file ascend/layout/ascend_layouts.cc
- * \brief Ascend fractal/NZ layout constructors and analysis (moved out of the
+ * \brief Ascend hardware layout constructors and analysis (moved out of the
  *  generic src/layout/ tree).
  */
 
 #include "support/check.h"
 #include <algorithm>
+#include <limits>
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/logging.h>
@@ -446,6 +447,149 @@ tirx::Buffer MakeStridedSlice(const tirx::Buffer &phys_buf,
   return Buffer(phys_buf->data, phys_buf->dtype, shape, strides, offset,
                 phys_buf->name + "_slice", phys_buf->data_alignment,
                 phys_buf->offset_factor, phys_buf->buffer_type);
+}
+
+// ── Ascend SIMT UB layouts ─────────────────────────────────────────
+
+/*!
+ * The storage formulas below are designed for the measured DAV-3510 SIMT UB
+ * request pattern, not borrowed from CUDA shared-memory bank layouts. Keep the
+ * virtual-group address rule, row-bit fold and f32-pair constraints together
+ * when changing these layouts. A virtual-group label is not a cycle estimate
+ * or a claim about the number of physical banks.
+ */
+
+/*!
+ * Periodic padding: insert delta elements after each period coordinates.
+ *
+ * For f32, the verified virtual-group label is (byte_address >> 3) & 15.
+ * A fixed pitch can repeatedly select the same group for strided rows/columns.
+ * Periodic gaps change that phase without padding every row. In element units:
+ *   axis 0: r*N + c + delta*floor(r/period)
+ *   axis 1: r*pitch + c + delta*floor(c/period),
+ *           pitch = N + delta*floor((N-1)/period).
+ * Column gaps must also grow the row pitch, otherwise adjacent rows alias.
+ * Axis/period/gap are explicit parameters, not a performance ranking policy.
+ * The default (axis=0, period=16, delta=2) matches the measured row-gap family.
+ *
+ * Callers must verify closed, bounded SIMT uses and exclude aliases, DMA
+ * endpoints, user layouts, opaque and explicit vector accesses. Construction
+ * here checks the static 2D f32 geometry and address bounds only.
+ * Even N and delta preserve aligned f32 pairs; column periods must be even so
+ * no hole splits a pair. The downstream vectorizer rechecks physical accesses.
+ * Keep these constraints with automatic ownership: the logical grouping does
+ * not prove every final instruction width. Unsupported sites retain storage.
+ *
+ * Represent the mapping as a Layout from logical (r,c) to a physical linear
+ * offset. OutputShape gives the physical span, with no trailing row gap.
+ * AscendLowerTileOp materializes allocation and all accesses through this
+ * Layout; subsequent version alignment uses the physical byte size.
+ * Check all products before arithmetic against signed int32 byte offsets.
+ * The caller selects this strategy explicitly; no request-profitability
+ * filter is applied. Extra capacity and address arithmetic can regress
+ * performance, so the caller must evaluate the resulting kernel.
+ */
+std::optional<Layout> TryMakeAscendUbPaddingLayout(const tirx::Buffer &buffer,
+                                                   int delta, int period,
+                                                   int axis) {
+  if (!buffer.defined() || buffer->shape.size() != 2 ||
+      buffer->dtype != DataType::Float(32) || delta <= 0 || period <= 0 ||
+      (axis != 0 && axis != 1))
+    return std::nullopt;
+  const auto *rows = buffer->shape[0].as<IntImmNode>();
+  const auto *cols = buffer->shape[1].as<IntImmNode>();
+  constexpr int64_t limit = std::numeric_limits<int32_t>::max() / 4;
+  if (!rows || !cols || rows->value <= 0 || cols->value <= 0 ||
+      cols->value % 2 || delta % 2 || (axis == 1 && period % 2) ||
+      cols->value > limit || rows->value > limit / cols->value)
+    return std::nullopt;
+  int64_t extent = axis == 0 ? rows->value : cols->value;
+  int64_t gaps = (extent - 1) / period;
+  if (gaps == 0)
+    return std::nullopt;
+  int64_t total = rows->value * cols->value;
+  if (axis == 0) {
+    if (gaps > (limit - total) / delta)
+      return std::nullopt;
+  } else {
+    if (gaps > (limit - cols->value) / delta)
+      return std::nullopt;
+    int64_t pitch = cols->value + gaps * delta;
+    if (rows->value > limit / pitch)
+      return std::nullopt;
+  }
+  PrimExpr row = InputPlaceholder(0), column = InputPlaceholder(1);
+  int64_t pitch = cols->value;
+  if (axis == 1)
+    pitch += gaps * delta;
+  PrimExpr coordinate = axis == 0 ? row : column;
+  PrimExpr offset = row * make_const(row.dtype(), pitch) + column +
+                    floordiv(coordinate, period) * delta;
+  return Layout(buffer->shape, {offset});
+}
+
+/*!
+ * Swizzle: permute column addresses within each row without growing storage.
+ *
+ * Merely keeping a compact row pitch can make neighboring rows reuse the same
+ * bank pattern. Instead, split a column c into pair index p = floor(c / 2) and
+ * low bit b = c % 2, and use the row to permute pairs:
+ *
+ *   groups = min(N / 2, 16)
+ *   mask = (r XOR floor(r / 16)) & (groups - 1)
+ *   physical_column = 2 * (p XOR mask) + b
+ *
+ * Fold row bits 4..7 into the low group bits. Rows spaced 16 apart no longer
+ * all have the same mask as in low-row-bit XOR. The cap at 16 follows the
+ * verified virtual-group count; higher column-pair bits remain unchanged.
+ * This is the measured two-row-bit-group fold, not an arbitrary hash or a
+ * guarantee that every row stride improves. Keeping
+ * b unchanged preserves each aligned two-f32 pair and its element order, which
+ * is necessary for the native pair-oriented layout. For example, N = 8 and
+ * r = 1 map logical columns [0,1,2,3,4,5,6,7] to [2,3,0,1,6,7,4,5].
+ *
+ * N must be a power of two and at least 4. Then N/2 pair indices form a
+ * complete bit domain, the folded mask stays in that domain, and XOR is a
+ * bijection and its own inverse for a fixed row. Thus all logical columns
+ * remain distinct and in bounds, rows remain separate, and the total allocation
+ * stays M * N * 4 bytes. An arbitrary non-power-of-two N would not have this
+ * closure property.
+ *
+ * As with padding, callers must verify compact internal UB storage and
+ * complete, unaliased, bounded SIMT uses; pointers, DMA, views, explicit user
+ * storage layouts and unsupported uses must be excluded.
+ * This constructor returns the logical-to-physical Layout without changing the
+ * Buffer. AscendLowerTileOp applies the same column permutation through
+ * Layout::Forward to every load and store, so a consumer finds each producer's
+ * value at the same physical address. Logical loop domains and thread ownership
+ * remain unchanged. Region metadata must cover the nonrectangular image
+ * conservatively when the physical Buffer is materialized.
+ *
+ * The caller selects this strategy explicitly, without request-profitability
+ * filtering. Extra integer address operations can outweigh reduced bank
+ * contention; the caller must evaluate the resulting kernel.
+ */
+std::optional<Layout> TryMakeAscendUbSwizzleLayout(const tirx::Buffer &buffer) {
+  if (!buffer.defined() || buffer->shape.size() != 2 ||
+      buffer->dtype != DataType::Float(32))
+    return std::nullopt;
+  const auto *rows = buffer->shape[0].as<IntImmNode>();
+  const auto *cols = buffer->shape[1].as<IntImmNode>();
+  constexpr int64_t limit = std::numeric_limits<int32_t>::max() / 4;
+  if (!rows || !cols || rows->value <= 0 || cols->value < 4 ||
+      (cols->value & (cols->value - 1)) || cols->value > limit ||
+      rows->value > limit / cols->value)
+    return std::nullopt;
+  PrimExpr row = InputPlaceholder(0), column = InputPlaceholder(1);
+  // XOR acts on pairs: it is self-inverse for a fixed row and preserves the
+  // low bit, hence each aligned two-element vector remains contiguous.
+  int64_t groups = std::min<int64_t>(cols->value / 2, 16);
+  PrimExpr folded_row = bitwise_xor(row, floordiv(row, 16));
+  PrimExpr physical_column =
+      bitwise_xor(floordiv(column, 2), bitwise_and(folded_row, groups - 1)) *
+          2 +
+      floormod(column, 2);
+  return Layout(buffer->shape, {row, physical_column});
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {

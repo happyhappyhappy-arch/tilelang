@@ -15,6 +15,10 @@ namespace tl {
 using namespace tirx;
 
 TVM_REGISTER_PASS_CONFIG_OPTION(kEnableAutoSchedule, Bool);
+TVM_REGISTER_PASS_CONFIG_OPTION(kUbLayoutStrategy, ffi::String);
+TVM_REGISTER_PASS_CONFIG_OPTION(kUbLayoutPaddingDelta, Integer);
+TVM_REGISTER_PASS_CONFIG_OPTION(kUbLayoutPaddingPeriod, Integer);
+TVM_REGISTER_PASS_CONFIG_OPTION(kUbLayoutPaddingAxis, Integer);
 
 // Emitted by tilelang.ascend.language.assume_conflict/assume_no_conflict and
 // consumed by src/ascend/transform/normalize_conflict_hints.cc, so it lives

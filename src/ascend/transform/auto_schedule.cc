@@ -65,10 +65,12 @@
 #include "ascend/op/utils.h"
 #include "ascend/transform/buffer_version.h"
 #include "backend/common/target_utils.h"
+#include "layout/layout.h"
 #include "op/utils.h"
 #include "runtime/thread_storage_scope.h"
 #include "support/check.h"
 #include "tir/transforms/ir_utils.h"
+#include "transform/common/attr.h"
 #include "transform/common/collector.h"
 #include "transform/common/constr_visitor.h"
 
@@ -222,6 +224,18 @@ public:
     memory_limits_[scope] = bytes;
   }
 
+  void SetStorageLayouts(const SBlock &root) {
+    PostOrderVisit(root, [&](const ObjectRef &node) {
+      const auto *block = node.as<SBlockNode>();
+      if (!block)
+        return;
+      if (auto value = block->annotations.Get(attr::kLayoutMap))
+        for (const auto &[buffer, layout] :
+             value.value().cast<Map<Buffer, Layout>>())
+          storage_layouts_.Set(buffer, layout);
+    });
+  }
+
   // Set manual buffer version overrides (from annotate_buffer_versions).
   // Keys are buffer data variables, values are fixed num_versions.
   void SetBufferVersionOverrides(BufferVersionMap overrides) {
@@ -291,6 +305,7 @@ private:
   }
 
   L0StorageGroups storage_groups_;
+  Map<Buffer, Layout> storage_layouts_;
   std::map<std::string, int64_t> memory_limits_;
   AivStorageMap aiv_storages_;
   BufferVersionMap buffer_version_overrides_;
@@ -830,12 +845,18 @@ void ScheduleBuilder::Z3SchedulePythonLoop(ControlNode *ctrl,
   }
   std::unordered_map<Var, int, ObjectPtrHash, ObjectPtrEqual>
       annotated_storage_versions;
-  auto get_buffer_size = [](const Buffer &buffer) -> int64_t {
+  auto get_buffer_size = [&](const Buffer &buffer) -> int64_t {
     // Bits-based: dtype.bits()*lanes()/8 truncates sub-byte dtypes to 0
     // (fp4 -> 0). Accumulate elements, then ceil(elements*bits/8).
     int64_t elem_bits = buffer->dtype.bits() * buffer->dtype.lanes();
     PrimExpr elems = IntImm(DataType::Int(64), 1);
-    for (const auto &dim : buffer->shape) {
+    // Inference keeps logical buffers until LowerTileOp. Account for the
+    // selected storage layout here so padding holes consume capacity already
+    // when choosing buffer versions, without changing dependency regions.
+    auto layout = storage_layouts_.Get(buffer);
+    auto shape =
+        layout.has_value() ? layout.value()->OutputShape() : buffer->shape;
+    for (const auto &dim : shape) {
       elems *= dim;
     }
     PrimExpr size = FloorDiv(elems * IntImm(DataType::Int(64), elem_bits) +
@@ -1386,6 +1407,7 @@ static void ScheduleSingleKernel(const Stmt &kernel_body, Target target,
 
   // Schedule IRStructure in place with the Z3 scheduler.
   ScheduleBuilder unit_builder;
+  unit_builder.SetStorageLayouts(metadata.kernel_root);
   L0StorageGroups groups(CollectL0SFBindings(metadata.kernel_root));
   metadata.buffer_versions = ExpandL0StorageGroupValues(
       metadata.buffer_versions, groups, "version counts");

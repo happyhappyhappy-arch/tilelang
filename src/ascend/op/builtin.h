@@ -14,6 +14,13 @@ namespace tl {
 // Ascend-specific pass configuration keys. Their string values remain stable
 // because they are part of the Python PassContext interface.
 static constexpr const char *kEnableAutoSchedule = "tl.enable_auto_schedule";
+static constexpr const char *kUbLayoutStrategy = "tl.ascend.ub_layout_strategy";
+static constexpr const char *kUbLayoutPaddingDelta =
+    "tl.ascend.ub_layout_padding_delta";
+static constexpr const char *kUbLayoutPaddingPeriod =
+    "tl.ascend.ub_layout_padding_period";
+static constexpr const char *kUbLayoutPaddingAxis =
+    "tl.ascend.ub_layout_padding_axis";
 
 /*!
  * \brief Marker op for user-declared auto-schedule conflict facts.

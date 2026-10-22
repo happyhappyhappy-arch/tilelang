@@ -185,6 +185,41 @@ def test_ss_versions_share_capacity_across_aivs(fixed, size):
     assert all(int(versions[buffer.data]) == 2 for buffer in buffers)
 
 
+@pytest.mark.parametrize("rows", [984, 992])
+@pytest.mark.parametrize("padding", [False, True])
+def test_storage_layout_span_counts_toward_version_capacity(rows, padding):
+    from tilelang.layout import Layout
+
+    ub = tirx.decl_buffer((rows, 32), "float32", name="ub", scope="shared")
+    out = tirx.decl_buffer((4,), "float32", name="out")
+    i = tirx.Var("i", "int32")
+    tasks = seq(
+        unit(tirx.BufferStore(ub, tirx.Cast("float32", i), [0, 0]), core=1, cost=(1, 1)),
+        unit(tirx.BufferStore(out, ub[0, 0], [i]), core=2, stage=2, cost=(1, 1)),
+    )
+    loop = tirx.For(
+        i,
+        0,
+        4,
+        tirx.ForKind.SERIAL,
+        tasks,
+        annotations={"num_stages": 3, "enable_offset": True, "multi_buffer_eligible": [ub.data]},
+    )
+    annotations = {}
+    if padding:
+        annotations["layout_map"] = {ub: Layout((rows, 32), lambda r, c: r * 32 + c + 2 * (r // 16))}
+    before = kernel(unit(loop, core=None), buffers=[ub], params=[out], annotations=annotations)
+    # Two compact 992x32 f32 versions exactly fill 248 KiB; padding makes
+    # that schedule infeasible. A smaller padded ring must still fit.
+    if padding and rows == 992:
+        with pytest.raises(RuntimeError, match="Manual schedule constraints are infeasible"):
+            ascend_transform.AutoSchedule()(before)
+        return
+    after = ascend_transform.AutoSchedule()(before)
+    root = next(block for block in nodes(after, tirx.SBlock) if block.name_hint == "tilelang_root")
+    assert int(root.annotations["tl.buffer_versions_map"][ub.data]) == 2
+
+
 def test_sf_hazard_uses_the_data_ring_variable_in_the_solver():
     # The consumer is two stages later. A one-version SF recurrence cannot
     # satisfy this manual schedule; it must use the group's requested ring.

@@ -1,6 +1,6 @@
 /*!
  * \file ascend/layout/ascend_layouts.h
- * \brief Ascend fractal/NZ layouts for Cube operands and their analysis.
+ * \brief Ascend hardware layouts for Cube and UB storage, and their analysis.
  *
  * These layouts and utilities are Ascend-specific and were split out of the
  * generic src/layout/ tree. They rely on the shared layout infrastructure in
@@ -10,6 +10,7 @@
 #define TVM_TL_ASCEND_LAYOUT_ASCEND_LAYOUTS_H_
 
 #include "layout/layout.h"
+#include <optional>
 
 namespace tvm {
 namespace tl {
@@ -135,6 +136,20 @@ namespace attr {
 constexpr const char *kL0AccessPitch = "tl.ascend_l0_access_pitch";
 
 } // namespace attr
+
+// ── Ascend SIMT UB layouts ─────────────────────────────────────────
+
+// DAV-3510 SIMT UB layouts for static 2D f32 tiles. Return nullopt for
+// unsupported geometry/parameters or int32 byte-offset overflow; padding
+// also returns nullopt when the selected period introduces no holes.
+// These constructors define address maps only. Callers must establish that
+// changing storage is legal for all uses (including aliases and DMA).
+// Hardware rationale and pair-preserving constraints accompany the formulas
+// in ascend_layouts.cc.
+std::optional<Layout> TryMakeAscendUbPaddingLayout(const tirx::Buffer &buffer,
+                                                   int delta, int period,
+                                                   int axis);
+std::optional<Layout> TryMakeAscendUbSwizzleLayout(const tirx::Buffer &buffer);
 
 } // namespace tl
 } // namespace tvm
