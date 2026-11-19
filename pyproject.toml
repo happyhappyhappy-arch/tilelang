@@ -27,7 +27,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
-    "apache-tvm-ffi>=0.1.11,<0.1.13",
+    "apache-tvm-ffi==0.1.14.post0",
     # torch-c-dlpack-ext provides prebuilt torch extensions.
     # Without it, TVM FFI may require JIT compilation on first import.
     # No prebuilt Windows ARM64 wheels are available for this optional extension.
