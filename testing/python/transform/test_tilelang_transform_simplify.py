@@ -897,7 +897,7 @@ def test_simplify_keeps_bind_used_in_metadata_objects(site):
         call = tirx.Call(call.dtype, call.op, call.args, annotations=metadata)
         body = tirx.BufferStore(output, call, [0])
     elif site == "cast":
-        value = tirx.Cast("float32", source[1], annotations=metadata)
+        value = T.Cast("float32", source[1], annotations=metadata)
         body = tirx.BufferStore(output, value, [0])
 
     func = tirx.PrimFunc([source, output], bind_then(tag, source[0], body))

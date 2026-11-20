@@ -58,6 +58,11 @@ TIR_DEFINE_TL_BUILTIN(access_ptr)
 TIR_DEFINE_TL_BUILTIN(region).set_num_inputs(-1).set_attr<TCallEffectKind>(
     "TCallEffectKind", static_cast<int64_t>(CallEffectKind::kPure));
 
+TIR_DEFINE_TL_BUILTIN(annotated_cast)
+    .set_num_inputs(-1)
+    .set_attr<TCallEffectKind>("TCallEffectKind",
+                               static_cast<int64_t>(CallEffectKind::kPure));
+
 TIR_DEFINE_TL_BUILTIN(launch_thread_idx)
     .set_num_inputs(1)
     .set_attr<TCallEffectKind>("TCallEffectKind",

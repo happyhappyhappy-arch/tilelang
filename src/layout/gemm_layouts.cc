@@ -404,28 +404,28 @@ struct SwizzleShapeInfo {
 
 SwizzleShapeInfo GetSwizzleShapeInfoChecked(const BufferVar &buffer) {
   ICHECK(buffer.defined()) << "Swizzle layout expects a defined buffer";
-  ICHECK(buffer.type()->shape.size() >= 2)
+  ICHECK(buffer->shape.size() >= 2)
       << "Swizzle layout expects rank >= 2 buffer, got rank="
-      << buffer.type()->shape.size();
-  size_t ndim = buffer.type()->shape.size();
-  auto stride = as_const_int(buffer.type()->shape[ndim - 2]);
-  auto continuous = as_const_int(buffer.type()->shape[ndim - 1]);
+      << buffer->shape.size();
+  size_t ndim = buffer->shape.size();
+  auto stride = as_const_int(buffer->shape[ndim - 2]);
+  auto continuous = as_const_int(buffer->shape[ndim - 1]);
   ICHECK(stride && continuous)
       << "Swizzle layout requires constant last-2 dims";
-  return SwizzleShapeInfo{*stride, *continuous, buffer.type()->dtype.bits()};
+  return SwizzleShapeInfo{*stride, *continuous, buffer->dtype.bits()};
 }
 
 bool TryGetSwizzleShapeInfo(const BufferVar &buffer, SwizzleShapeInfo *info) {
-  if (!buffer.defined() || buffer.type()->shape.size() < 2) {
+  if (!buffer.defined() || buffer->shape.size() < 2) {
     return false;
   }
-  size_t ndim = buffer.type()->shape.size();
-  auto stride = as_const_int(buffer.type()->shape[ndim - 2]);
-  auto continuous = as_const_int(buffer.type()->shape[ndim - 1]);
+  size_t ndim = buffer->shape.size();
+  auto stride = as_const_int(buffer->shape[ndim - 2]);
+  auto continuous = as_const_int(buffer->shape[ndim - 1]);
   if (!stride || !continuous) {
     return false;
   }
-  *info = SwizzleShapeInfo{*stride, *continuous, buffer.type()->dtype.bits()};
+  *info = SwizzleShapeInfo{*stride, *continuous, buffer->dtype.bits()};
   return true;
 }
 
@@ -433,9 +433,9 @@ bool TryGetSwizzleShapeInfo(const BufferVar &buffer, SwizzleShapeInfo *info) {
 
 static Layout ExpandLayout2D(const Layout &base, const BufferVar &buffer) {
   Array<PrimExpr> leading_shape;
-  leading_shape.reserve(buffer.type()->shape.size() - 2);
-  for (size_t i = 0; i + 2 < buffer.type()->shape.size(); ++i) {
-    leading_shape.push_back(buffer.type()->shape[i]);
+  leading_shape.reserve(buffer->shape.size() - 2);
+  for (size_t i = 0; i + 2 < buffer->shape.size(); ++i) {
+    leading_shape.push_back(buffer->shape[i]);
   }
   return base->Expand(leading_shape);
 }
@@ -857,8 +857,8 @@ Layout MakeGemmABLayoutHopper(int mat_stride, int mat_continuous,
       return makeGemmABLayoutF64_Kinner(mat_stride, mat_continuous);
     // fallback for float64 when stride % 8 != 0
     if (mat_stride % 8 != 0)
-      return MakeLinearLayout(
-          Array<PrimExpr>{IntImm::Int32(mat_stride), IntImm::Int32(mat_continuous)});
+      return MakeLinearLayout(Array<PrimExpr>{IntImm::Int32(mat_stride),
+                                              IntImm::Int32(mat_continuous)});
     return MakeQuarterBankSwizzleLayout2D(mat_stride, mat_continuous,
                                           element_size);
   }
@@ -877,8 +877,8 @@ Layout MakeGemmABLayoutHopper(int mat_stride, int mat_continuous,
   }
 
   if (mat_continuous % vector_size == 0)
-    return MakeLinearLayout(
-        Array<PrimExpr>{IntImm::Int32(mat_stride), IntImm::Int32(mat_continuous)});
+    return MakeLinearLayout(Array<PrimExpr>{IntImm::Int32(mat_stride),
+                                            IntImm::Int32(mat_continuous)});
   else
     ICHECK(0) << "Unsupported layout for Hopper with stride=" << mat_stride
               << ", continuous=" << mat_continuous
@@ -906,8 +906,8 @@ Layout MakeGemmABLayoutSm100(int mat_stride, int mat_continuous, int continuity,
   }
 
   if (mat_continuous % vector_size == 0)
-    return MakeLinearLayout(
-        Array<PrimExpr>{IntImm::Int32(mat_stride), IntImm::Int32(mat_continuous)});
+    return MakeLinearLayout(Array<PrimExpr>{IntImm::Int32(mat_stride),
+                                            IntImm::Int32(mat_continuous)});
   else
     ICHECK(0) << "Unsupported layout for sm100 with stride=" << mat_stride
               << ", continuous=" << mat_continuous
@@ -920,7 +920,8 @@ Layout MakeGemmABLayoutCDNA(int stride, int continuous, int element_size,
   return makeMatrixCoreSwizzleLayout(stride, continuous, element_size, kPack);
 }
 
-Layout MakeSwizzledLayout(const BufferVar &buffer, bool k_inner, bool allow_pad) {
+Layout MakeSwizzledLayout(const BufferVar &buffer, bool k_inner,
+                          bool allow_pad) {
   auto info = GetSwizzleShapeInfoChecked(buffer);
   Layout base;
   if (allow_pad) {
@@ -935,7 +936,8 @@ Layout MakeSwizzledLayout(const BufferVar &buffer, bool k_inner, bool allow_pad)
   return ExpandLayout2D(base, buffer);
 }
 
-Layout MakeVoltaSwizzledLayout(const BufferVar &buffer, bool is_a, bool k_inner) {
+Layout MakeVoltaSwizzledLayout(const BufferVar &buffer, bool is_a,
+                               bool k_inner) {
   auto info = GetSwizzleShapeInfoChecked(buffer);
   auto base =
       MakeGemmVoltaABLayout(static_cast<int>(info.stride),

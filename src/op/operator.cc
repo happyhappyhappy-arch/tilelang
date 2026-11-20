@@ -27,7 +27,7 @@ using namespace tirx;
  * TileOperator.
  *
  * @param call The TIR Call whose operator and arguments will be used to build
- * the TileOperator. Its `call->annotations` are passed through as TileOp-local
+ * the TileOperator. Its call attributes are passed through as TileOp-local
  * annotations.
  * @param block_annotations The complete enclosing SBlock annotations visible
  * while parsing this TileOp.
@@ -41,7 +41,10 @@ TileOperator ParseOperator(const Call &call,
       Op::GetAttrMap<OpBlockAnnotationHandlerFunc>(kTLOpBlockAnnotationHandler);
   Op op = call->op.as<Op>().value();
   if (op_map.count(op)) {
-    auto tile_op = op_map[op](call->args, call->annotations);
+    auto attributes = call->attrs.defined()
+                          ? call->attrs.as_or_throw<DictAttrs>()->dict
+                          : BlockAnnotations{};
+    auto tile_op = op_map[op](call->args, attributes);
     ICHECK(tile_op.defined());
     if (block_annotation_handler_map.count(op)) {
       tile_op = block_annotation_handler_map[op](tile_op, block_annotations);
@@ -81,24 +84,25 @@ TileOperator ParseOperator(const Stmt &stmt,
  * function performs runtime checks and will abort if `expr` is not a call, the
  * call is not `tvm_access_ptr`, or the second argument is not a `Var`.
  *
- * @param expr A `PrimExpr` representing a `tvm_access_ptr(...)` call.
+ * @param expr An `Expr` representing a `tvm_access_ptr(...)` call.
  * @return tvm::Var The `Var` referenced by the `tvm_access_ptr` call.
  */
-Var GetVarFromAccessPtr(const PrimExpr &expr) {
+Var GetVarFromAccessPtr(const Expr &expr) {
   auto call = expr.as<CallNode>();
   ICHECK(call);
   if (call->op.same_as(builtin::tvm_access_ptr())) {
-    auto var = call->args[1].as<VarNode>();
-    ICHECK(var);
-    return tvm::ffi::GetRef<Var>(var);
+    const Expr &data = call->args[1];
+    if (auto raw = data.as<Var>()) {
+      return *raw;
+    }
+    auto address = data.as_or_throw<Call>();
+    ICHECK(address->op.same_as(builtin::buffer_data()));
+    return address->args[0].as_or_throw<BufferVar>().var();
   }
   if (call->op.same_as(tl::access_ptr())) {
     ICHECK_EQ(call->args.size(), 3U);
-    auto load = call->args[0].as<BufferLoadNode>();
-    ICHECK(load);
-    auto var = load->buffer->data.as<VarNode>();
-    ICHECK(var);
-    return tvm::ffi::GetRef<Var>(var);
+    auto load = call->args[0].as_or_throw<TensorLoad>();
+    return load->source.as_or_throw<BufferVar>().var();
   }
   LOG(FATAL) << "GetVarFromAccessPtr expects a tvm_access_ptr or tl.access_ptr "
                 "call, but got: "

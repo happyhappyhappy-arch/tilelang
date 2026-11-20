@@ -436,7 +436,13 @@ else()
 endif()
 option(TILELANG_RELEASE_BUILD "Strip source paths from log messages (for wheel releases)" ${TILELANG_RELEASE_BUILD_DEFAULT})
 
-# Include tvm after configs have been populated
+# scikit-build's version here belongs to TileLang. Use the compiler's own
+# source version when it is built as a subproject of the wheel.
+if(DEFINED SKBUILD_PROJECT_VERSION_FULL AND NOT DEFINED TVM_VERSION)
+  file(STRINGS "${TVM_SOURCE}/include/tvm/runtime/base.h" tvm_version_line
+       REGEX "^#define TVM_VERSION ")
+  string(REGEX REPLACE "^#define TVM_VERSION \"([^\"]+)\"$" "\\1" TVM_VERSION "${tvm_version_line}")
+endif()
 add_subdirectory(${TVM_SOURCE} tvm EXCLUDE_FROM_ALL)
 foreach(tvm_target IN ITEMS tvm_objs tvm_runtime_objs tvm_compiler tvm_runtime)
   target_compile_definitions(${tvm_target} PUBLIC TVM_LOG_CUSTOMIZE=1)

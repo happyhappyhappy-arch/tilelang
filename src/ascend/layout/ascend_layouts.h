@@ -4,12 +4,14 @@
  *
  * These layouts and utilities are Ascend-specific and were split out of the
  * generic src/layout/ tree. They rely on the shared layout infrastructure in
- * "layout/layout.h" (Layout, tirx::Buffer, Range, ExpandLayout2D, ...).
+ * "layout/layout.h" (Layout, tirx::BufferVar, Range, ExpandLayout2D, ...).
  */
 #ifndef TVM_TL_ASCEND_LAYOUT_ASCEND_LAYOUTS_H_
 #define TVM_TL_ASCEND_LAYOUT_ASCEND_LAYOUTS_H_
 
 #include "layout/layout.h"
+#include <tvm/ffi/container/variant.h>
+#include <tvm/tirx/stmt.h>
 
 namespace tvm {
 namespace tl {
@@ -20,17 +22,18 @@ namespace tl {
 // (16 for bf16/fp16, 32 for fp8, 8 for fp32). In MajorK, cols is the reduce-K
 // axis; in MajorMN, cols is the output M/N axis. The legacy NZ name is kept as
 // an alias of MajorK during the transition.
-Layout MakeAscendMajorKLayout(const tirx::Buffer &buffer, int k_align = 1);
-Layout MakeAscendMajorMNLayout(const tirx::Buffer &buffer, int k_align = 1);
-Layout MakeAscendL0CLayout(const tirx::Buffer &buffer);
-Layout MakeAscendSFLayout(const tirx::Buffer &buffer);
-Layout MakeAscendNZLayout(const tirx::Buffer &buffer);
+Layout MakeAscendMajorKLayout(const tirx::BufferVar &buffer, int k_align = 1);
+Layout MakeAscendMajorMNLayout(const tirx::BufferVar &buffer, int k_align = 1);
+Layout MakeAscendL0CLayout(const tirx::BufferVar &buffer);
+Layout MakeAscendSFLayout(const tirx::BufferVar &buffer);
+Layout MakeAscendNZLayout(const tirx::BufferVar &buffer);
 
 // Compact padded-NZ layout used by software UB ND->NZ scatter:
 // [leading..., row, col] -> [flatten(leading...) * (cols/C0) + col/C0,
 //                            row, col%C0].
-Layout MakeAscendCompactNZLayout(const tirx::Buffer &buffer);
-bool IsAscendCompactNZLayout(const Layout &layout, const tirx::Buffer &buffer);
+Layout MakeAscendCompactNZLayout(const tirx::BufferVar &buffer);
+bool IsAscendCompactNZLayout(const Layout &layout,
+                             const tirx::BufferVar &buffer);
 
 // Ascend NZ column fractal C0 = 32 bytes / element_size = 256 / element_bits
 // (16 for bf16/fp16, 32 for fp8, 8 for fp32).
@@ -38,7 +41,7 @@ int AscendC0(int element_bits);
 
 // Ascend ND (row-major) identity layout for GM/UB operands; OutputShape ==
 // InputShape. Used for copy-parameter derivation only (not anchored).
-Layout makeAscendNDLayout(const tirx::Buffer &buffer);
+Layout makeAscendNDLayout(const tirx::BufferVar &buffer);
 
 /// Compute a 0-origin strided buffer view for a logical sub-region on a
 /// layout-annotated physical buffer.
@@ -49,20 +52,19 @@ Layout makeAscendNDLayout(const tirx::Buffer &buffer);
 ///   - layout: the layout whose forward map describes the physical layout.
 ///   - logical_region: one Range per layout input dim, [min, min+extent).
 ///
-/// Produces a Buffer sharing phys_buf->data, with:
+/// Declares a view of the original physical pointer, with:
 ///   - shape = physical extents (from MapRegionBounds)
 ///   - strides = phys_buf strides, or row-major strides inferred from its shape
 ///   - elem_offset = phys_buf.elem_offset + sum(min_i * stride_i)
 ///
-/// The result is a plain strided buffer — no layout knowledge needed by
-/// the consumer.
+/// Consumers emit the declaration before accessing its buffer.
 ///
 /// Example (NZ): logical [32:64, 32:96] on [128, 128] bf16
 ///   → phys_region = [2:2, 2:4, 0:16, 0:16]
 ///   → shape = [2, 4, 16, 16], strides = [2048, 256, 16, 1], offset = 4608
-tirx::Buffer MakeStridedSlice(const tirx::Buffer &phys_buf,
-                              const Layout &layout,
-                              const ffi::Array<Range> &logical_region);
+tirx::DeclBuffer
+MakeStridedSlice(const ffi::Variant<tirx::BufferVar, tirx::DeclBuffer> &source,
+                 const Layout &layout, const ffi::Array<Range> &logical_region);
 
 // ── Ascend fractal layout analysis ──────────────────────────────────
 //
@@ -118,7 +120,7 @@ bool IsAscendFractalLayout(const Layout &layout);
 /// Extract information from a tagged canonical Ascend fractal layout.
 /// Returns false for undefined/invalid inputs and fails for an untagged layout.
 bool TryExtractAscendFractalLayout(const Layout &layout,
-                                   const tirx::Buffer &buf,
+                                   const tirx::BufferVar &buf,
                                    AscendFractalLayoutInfo *out);
 
 /// Map a logical region through \p layout and extract the trailing four

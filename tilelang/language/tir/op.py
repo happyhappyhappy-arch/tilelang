@@ -4,10 +4,10 @@ from numbers import Integral
 from typing import Any
 
 import tvm
-from tvm.ir import PrimExpr
+from tvm.ir import Expr as PrimExpr, is_prim_expr
 from tvm.ir.base import Span
 from tvm.runtime import const
-from tvm.tirx import Buffer
+from tvm.tirx import buffer_data, is_buffer_var
 from tvm.tirx.expr import IntImm, Shuffle as Shuffle
 import tvm.tirx.op as _tvm_op
 
@@ -16,8 +16,8 @@ from tilelang.utils.deprecated import deprecated_warning
 
 
 def _buffer_data(value):
-    if isinstance(value, Buffer):
-        return value.data
+    if is_buffer_var(value):
+        return buffer_data(value)
     return value
 
 
@@ -153,7 +153,7 @@ def extract_lane(vector: PrimExpr, lane: int | IntImm, span: Span | None = None)
     result : PrimExpr
         A scalar expression with the vector's element dtype.
     """
-    if not isinstance(vector, PrimExpr):
+    if not is_prim_expr(vector):
         raise TypeError(f"extract_lane expects a PrimExpr, but got {type(vector).__name__}")
 
     lanes = vector.dtype.lanes

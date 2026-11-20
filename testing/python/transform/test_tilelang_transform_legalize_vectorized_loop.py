@@ -216,7 +216,7 @@ def test_condition_cast_preserves_rbits_grouping(rbits_group):
     out = tir.decl_buffer((16,), "bfloat16", name="Out")
     i = tir.Var("i", "int32")
     value = tir.Var("value", "float32")
-    rounded = tir.Cast("bfloat16", value, annotations={"round": "rs", "rbits": tir.Cast("uint32", i // rbits_group)})
+    rounded = T.Cast("bfloat16", value, annotations={"round": "rs", "rbits": tir.Cast("uint32", i // rbits_group)})
     body = tir.IfThenElse(rounded > tir.const(0, "bfloat16"), tir.BufferStore(out, a[i], [i]), None)
     func = tir.PrimFunc([a, out, value], tir.For(i, 0, 16, tir.ForKind.VECTORIZED, body))
     with tvm.target.Target({"kind": "cuda", "arch": "sm_100a"}):

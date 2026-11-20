@@ -27,7 +27,8 @@ def test_strided_slice_accumulates_base_offsets(strides, symbolic, first_offset,
 
     analyzer = tvm.arith.Analyzer()
     for result, shape, relative_offset in [(view, (2, 4), first_offset), (nested, (1, 2), second_offset)]:
-        assert result.data.same_as(physical.data)
+        tvm.ir.assert_structural_equal(result.data, tirx.buffer_data(physical))
+        result = result.buffer
         assert result.dtype == physical.dtype
         assert list(result.shape) == list(shape)
         assert list(result.strides) == list(strides or (8, 1))

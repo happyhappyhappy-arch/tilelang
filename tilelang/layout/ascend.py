@@ -110,23 +110,11 @@ def make_ascend_sf_layout(buffer: BufferLikeType):
 
 
 def make_strided_slice(phys_buf, layout, logical_region):
-    """
-    Compute a 0-origin strided buffer view for a logical sub-region on a
-    layout-annotated physical buffer.
+    """Declare a strided view into a physical buffer or an existing view.
 
-    The result is a plain strided Buffer sharing ``phys_buf``'s data pointer,
-    with explicit shape (extents) and strides pointing at the sub-region's
-    base element, including ``phys_buf.elem_offset``. No layout knowledge is
-    needed by the consumer.
-
-    Args:
-        phys_buf: The physical (remapped) buffer, e.g. with NZ shape
-            ``[M/16, K/C0, 16, C0]``.
-        layout: The Layout whose forward map describes the physical layout.
-        logical_region: One ``Range`` per layout input dim, ``[min, min+extent)``.
-
-    Returns:
-        Buffer: A strided buffer view into ``phys_buf``.
+    The returned TIRx DeclBuffer binds its buffer to the original data pointer.
+    Its buffer type records the physical shape, strides and accumulated offset.
+    Emit the declaration before using its buffer in TIRx.
     """
     return _ffi_api.make_strided_slice(phys_buf, layout, logical_region)
 

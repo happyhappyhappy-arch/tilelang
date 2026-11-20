@@ -29,7 +29,7 @@
 namespace tvm {
 namespace tl {
 
-using AddWorkspaceCallback = std::function<PrimExpr(int, DataType)>;
+using AddWorkspaceCallback = std::function<PrimExpr(int, PrimType)>;
 // Allocate a compiler-generated shared mbarrier slot. The optional hint names
 // the backing barrier buffer when the first slot is created; later slots share
 // the same buffer and may ignore the hint.
@@ -39,8 +39,8 @@ using UpdateBarrierArriveCallback = std::function<void(tirx::Var, PrimExpr)>;
 // Record a minimum shared-memory base alignment (bytes) required for the
 // buffer backed by the given data Var (e.g. TMA/MMA swizzle constraints).
 using RequireSmemAlignmentCallback = std::function<void(tirx::Var, int)>;
-using LayoutMap = ffi::Map<tirx::Buffer, Layout>;
-using BufferMap = ffi::Map<tirx::Var, tirx::Buffer>;
+using LayoutMap = ffi::Map<tirx::BufferVar, Layout>;
+using BufferMap = ffi::Map<tirx::Var, tirx::BufferVar>;
 using BlockAnnotations = ffi::Map<ffi::String, ffi::Any>;
 
 enum AccessMask : int {
@@ -111,18 +111,18 @@ struct LowerArgs {
   // CPU) pass constant 0. It must never be an unbound synthetic Var.
   PrimExpr thread_index;
   LayoutMap layout_map;
-  ffi::Map<tirx::Buffer, tirx::Buffer> buffer_remap;
+  ffi::Map<tirx::BufferVar, tirx::BufferVar> buffer_remap;
   // Map from Bind variable to its bound expression, for resolving
   // fragment buffer accesses through Bind values
   ffi::Map<tirx::Var, PrimExpr> bind_var_to_expr;
   // Fallback mbarrier parity for ops that do not carry an explicit
   // tl.pipeline_mbar_phase_expr annotation. LowerTileOp derives this from the
   // zero-based epoch of the nearest enclosing serial loop.
-  PrimExpr mbar_phase_expr = IntImm(DataType::Int(32), 0);
+  PrimExpr mbar_phase_expr = IntImm(PrimType::Int(32), 0);
   // Pointer to the shared.barrier buffer for compiler-generated mbarriers.
   // Points to the LowerTileOpPass member so copy.cc sees the buffer
   // even when created lazily by the alloc_mbarrier callback.
-  ffi::Optional<tirx::Buffer> *mbarrier_buffer = nullptr;
+  ffi::Optional<tirx::BufferVar> *mbarrier_buffer = nullptr;
   // Product of cluster_dims (from block annotation). Defaults to 1 (no
   // cluster). Used by TMA copy lowering to scale expect_tx bytes for cluster
   // barriers.
@@ -159,7 +159,7 @@ struct LayoutInferArgs {
   Range thread_bounds;
   LayoutMap layout_map;
   arith::Analyzer *analyzer;
-  ffi::Map<tirx::Buffer, tirx::Buffer> buffer_remap;
+  ffi::Map<tirx::BufferVar, tirx::BufferVar> buffer_remap;
   // Map from Bind variable to its bound expression, for resolving
   // fragment buffer accesses through Bind values
   ffi::Map<tirx::Var, PrimExpr> bind_var_to_expr;
@@ -227,17 +227,17 @@ public:
                                              TileOperatorNode);
 };
 
-tirx::Var GetVarFromAccessPtr(const PrimExpr &expr);
+tirx::Var GetVarFromAccessPtr(const Expr &expr);
 
 TileOperator
-ParseOperator(const tirx::Call &call,
+ParseOperator(const Call &call,
               const BlockAnnotations &block_annotations = BlockAnnotations());
 TileOperator
 ParseOperator(const tirx::Stmt &stmt,
               const BlockAnnotations &block_annotations = BlockAnnotations());
 
 using OpBuilderFunc = ffi::TypedFunction<TileOperator(
-    ffi::Array<PrimExpr>, ffi::Map<ffi::String, ffi::ObjectRef>)>;
+    ffi::Array<Expr>, ffi::Map<ffi::String, ffi::Any>)>;
 using OpBlockAnnotationHandlerFunc =
     ffi::TypedFunction<TileOperator(TileOperator, BlockAnnotations)>;
 
@@ -252,9 +252,8 @@ static constexpr const char *kTLOpBlockAnnotationHandler =
   TVM_REGISTER_OP("tl.tileop." #OpName)                                        \
       .set_attr<tirx::TScriptPrinterName>("TScriptPrinterName", #OpName)       \
       .set_attr<OpBuilderFunc>(                                                \
-          "TLOpBuilder",                                                       \
-          [](ffi::Array<PrimExpr> args,                                        \
-             ffi::Map<ffi::String, ffi::ObjectRef> annotations) {              \
+          "TLOpBuilder", [](ffi::Array<Expr> args,                             \
+                            ffi::Map<ffi::String, ffi::Any> annotations) {     \
             return Entry(args, annotations);                                   \
           })
 

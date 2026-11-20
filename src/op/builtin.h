@@ -146,6 +146,10 @@ static constexpr const char *kPassProfileThresholdMs =
  */
 TVM_DLL const Op &tvm_ffi_call_with_result();
 
+/*! \brief A cast of (value[, random_bits]) with rounding and saturation
+ * attributes. */
+TVM_DLL const Op &annotated_cast();
+
 /*!
  * \brief TileLang intrinsic for carrying pointer access metadata in frontend.
  *

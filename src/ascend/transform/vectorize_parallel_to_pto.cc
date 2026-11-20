@@ -823,6 +823,77 @@ private:
     if (const auto *div = expr.as<DivNode>()) {
       return ConvertBinary(div->a, div->b, "vdiv", pre);
     }
+    if (auto cast = GetCastOperands(expr)) {
+      // Convert the input exactly once, then plan from the explicit shape of
+      // that converted input (the original Cast carries the element types).
+      PrimExpr value = ConvertExpr(cast->value, pre);
+      pto_analysis::CastContext context;
+      if (value.ty().lanes() == 1) {
+        context.value_kind = pto_analysis::CastValueKind::kScalar;
+        context.logical_lanes = 1;
+      } else {
+        ICHECK_EQ(value.ty().lanes(), lanes_)
+            << "[VectorizeParallelToPTO] internal error: Cast input has "
+               "unexpected lanes "
+            << value.ty().lanes() << " (current VL " << lanes_ << ")";
+        context.value_kind = pto_analysis::CastValueKind::kVectorVmi;
+        context.logical_lanes = lanes_;
+      }
+      ICHECK_EQ(value.ty().WithLanes(1), cast->value.ty())
+          << "[VectorizeParallelToPTO] internal error: converted Cast input "
+             "element type "
+          << value.ty().WithLanes(1) << " does not match the original "
+          << cast->value.ty();
+      std::string plan_why;
+      auto plan = pto_analysis::PlanValueCast(*cast, context, &plan_why);
+      ICHECK(plan.has_value())
+          << "[VectorizeParallelToPTO] internal error: Cast passed Verify "
+             "without a conversion plan: "
+          << plan_why;
+      if (const auto *scalar =
+              std::get_if<pto_analysis::ScalarCastPlan>(&plan.value())) {
+        ICHECK_EQ(value.ty().lanes(), 1)
+            << "[VectorizeParallelToPTO] internal error: scalar Cast plan "
+               "for a vector input";
+        if (scalar->action == pto_analysis::ScalarCastAction::kKeepInput) {
+          return value;
+        }
+        // Rebuild the ordinary scalar Cast with the validated annotations and
+        // the original span; the scalar lowering itself is unchanged.
+        return prim::Cast(cast->dtype, value, expr->span);
+      }
+      const auto &vector = std::get<pto_analysis::VectorCastPlan>(plan.value());
+      PrimExpr current = value;
+      for (const auto &step : vector.steps) {
+        ICHECK_EQ(current.ty().WithLanes(1), step.from)
+            << "[VectorizeParallelToPTO] internal error: Cast step expects "
+            << step.from << ", got " << current.ty().WithLanes(1);
+        Map<String, Any> attrs;
+        attrs.Set("to_dtype",
+                  prim::StringImm(ffi::DLDataTypeToString(step.to->dtype)));
+        PrimExpr call;
+        if (step.op == pto_analysis::VectorCastOp::kIntegerReinterpret) {
+          call = Call(step.to.WithLanes(lanes_), VmiOp("vinterpret_cast"),
+                      {current}, DictAttrs(attrs));
+        } else {
+          if (!step.saturate.empty()) {
+            attrs.Set("saturate", StringImm(step.saturate));
+          }
+          if (!step.rounding.empty()) {
+            attrs.Set("rounding", StringImm(step.rounding));
+          }
+          call = Call(step.to.WithLanes(lanes_), VmiOp("vcvt"), {current},
+                      DictAttrs(attrs));
+        }
+        current = EmitBind("cast", call, pre);
+      }
+      // Zero steps is the proven identity; a final type check keeps every
+      // multi-step chain honest (source convert once, dtype/VL continuous).
+      ICHECK_EQ(current.ty(), cast->dtype.WithLanes(lanes_))
+          << "[VectorizeParallelToPTO] internal error: Cast plan ended at "
+          << current.ty() << ", expected " << cast->dtype.WithLanes(lanes_);
+      return current;
+    }
     if (const auto *call = expr.as<CallNode>()) {
       // Hardware-backed unary math (fabs/exp/log/sqrt); the dtype matrix
       // mirrors the ISA documentation (see IsSupportedVectorUnaryOp).
@@ -849,77 +920,6 @@ private:
                       Call(VectorDType(expr.dtype().element_of(), lanes_),
                            VmiOp(it->second), {a, mask_var_}),
                       pre);
-    }
-    if (const auto *cast = expr.as<CastNode>()) {
-      // Convert the input exactly once, then plan from the explicit shape of
-      // that converted input (the original Cast carries the element types).
-      PrimExpr value = ConvertExpr(cast->value, pre);
-      pto_analysis::CastContext context;
-      if (value.dtype().lanes() == 1) {
-        context.value_kind = pto_analysis::CastValueKind::kScalar;
-        context.logical_lanes = 1;
-      } else {
-        ICHECK_EQ(value.dtype().lanes(), lanes_)
-            << "[VectorizeParallelToPTO] internal error: Cast input has "
-               "unexpected lanes "
-            << value.dtype().lanes() << " (current VL " << lanes_ << ")";
-        context.value_kind = pto_analysis::CastValueKind::kVectorVmi;
-        context.logical_lanes = lanes_;
-      }
-      ICHECK_EQ(value.dtype().element_of(), cast->value.dtype())
-          << "[VectorizeParallelToPTO] internal error: converted Cast input "
-             "element type "
-          << value.dtype().element_of() << " does not match the original "
-          << cast->value.dtype();
-      std::string plan_why;
-      auto plan = pto_analysis::PlanValueCast(cast, context, &plan_why);
-      ICHECK(plan.has_value())
-          << "[VectorizeParallelToPTO] internal error: Cast passed Verify "
-             "without a conversion plan: "
-          << plan_why;
-      if (const auto *scalar =
-              std::get_if<pto_analysis::ScalarCastPlan>(&plan.value())) {
-        ICHECK_EQ(value.dtype().lanes(), 1)
-            << "[VectorizeParallelToPTO] internal error: scalar Cast plan "
-               "for a vector input";
-        if (scalar->action == pto_analysis::ScalarCastAction::kKeepInput) {
-          return value;
-        }
-        // Rebuild the ordinary scalar Cast with the validated annotations and
-        // the original span; the scalar lowering itself is unchanged.
-        return Cast(cast->dtype, value, scalar->annotations, cast->span);
-      }
-      const auto &vector = std::get<pto_analysis::VectorCastPlan>(plan.value());
-      PrimExpr current = value;
-      for (const auto &step : vector.steps) {
-        ICHECK_EQ(current.dtype().element_of(), step.from)
-            << "[VectorizeParallelToPTO] internal error: Cast step expects "
-            << step.from << ", got " << current.dtype().element_of();
-        Map<String, ObjectRef> attrs;
-        attrs.Set("to_dtype", StringImm(TvmDtypeName(step.to)));
-        PrimExpr call;
-        if (step.op == pto_analysis::VectorCastOp::kIntegerReinterpret) {
-          call = Call(VectorDType(step.to, lanes_), VmiOp("vinterpret_cast"),
-                      {current}, attrs);
-        } else {
-          if (!step.saturate.empty()) {
-            attrs.Set("saturate", StringImm(step.saturate));
-          }
-          if (!step.rounding.empty()) {
-            attrs.Set("rounding", StringImm(step.rounding));
-          }
-          call = Call(VectorDType(step.to, lanes_), VmiOp("vcvt"), {current},
-                      attrs);
-        }
-        current = EmitBind("cast", call, pre);
-      }
-      // Zero steps is the proven identity; a final type check keeps every
-      // multi-step chain honest (source convert once, dtype/VL continuous).
-      ICHECK_EQ(current.dtype(), VectorDType(cast->dtype, lanes_))
-          << "[VectorizeParallelToPTO] internal error: Cast plan ended at "
-          << current.dtype() << ", expected "
-          << VectorDType(cast->dtype, lanes_);
-      return current;
     }
     LOG(FATAL) << "[VectorizeParallelToPTO] internal error: unsupported "
                   "expression passed Verify: "
@@ -967,35 +967,6 @@ private:
                     Call(VectorDType(a.dtype().element_of(), lanes_),
                          VmiOp(vmi_name), {a, b, mask_var_}),
                     pre);
-  }
-
-  // TVM dtype name identical to Python str(dtype) (vmi.py ABI):
-  // float32 -> "float32", bfloat16 -> "bfloat16", int8 -> "int8", ...
-  static std::string TvmDtypeName(DataType dtype) {
-    std::ostringstream os;
-    if (dtype.is_bfloat16()) {
-      return "bfloat16";
-    }
-    // The FP8 spellings the PTO dtype parser recognizes; both are the TIR
-    // dtype names, not the PTO target names.
-    if (dtype.is_float8_e4m3fn()) {
-      return "float8_e4m3fn";
-    }
-    if (dtype.is_float8_e5m2()) {
-      return "float8_e5m2";
-    }
-    if (dtype.is_float()) {
-      os << "float" << dtype.bits();
-    } else if (dtype.is_int()) {
-      os << "int" << dtype.bits();
-    } else if (dtype.is_uint()) {
-      os << "uint" << dtype.bits();
-    } else if (dtype.is_bool()) {
-      return "bool";
-    } else {
-      os << dtype;
-    }
-    return os.str();
   }
 
   Var EmitBind(const std::string &name, const PrimExpr &value,

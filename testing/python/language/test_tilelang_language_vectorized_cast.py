@@ -1,9 +1,21 @@
 import pytest
 import torch
+import tvm_ffi
 import tilelang.testing
 import tilelang.language as T
 from tilelang import tvm
 from tvm import tirx
+
+
+def test_stochastic_cast_random_bits_follow_substitution():
+    value = tirx.Var("x", "float32")
+    bits = tirx.Var("bits", "uint32")
+    replacement = tirx.Var("replacement", "uint32")
+    expr = T.cast(value, "bfloat16", round="rs", rbits=bits)
+    rewritten = tvm_ffi.structural_map(expr, (type(bits), lambda var: replacement if var.same_as(bits) else var))
+    assert rewritten.args[1].same_as(replacement)
+    assert rewritten.attrs["round"].value == "rs"
+    tvm.ir.assert_structural_equal(rewritten, tvm.ir.load_json(tvm.ir.save_json(rewritten)), map_free_vars=True)
 
 
 @tilelang.jit
@@ -205,8 +217,8 @@ def test_fp4_fp8_codegen(lanes, destination, via_fp32):
         # An annotation on either cast keeps the fp32 detour.
         for annotation_owner in ("inner", "outer"):
             annotations = {"sat": tirx.IntImm("bool", 1)}
-            intermediate = tirx.Cast("float32" + suffix, value, annotations if annotation_owner == "inner" else None)
-            annotated = tirx.Cast(destination + suffix, intermediate, annotations if annotation_owner == "outer" else None)
+            intermediate = T.Cast("float32" + suffix, value, annotations if annotation_owner == "inner" else None)
+            annotated = T.Cast(destination + suffix, intermediate, annotations if annotation_owner == "outer" else None)
             annotated_func = func.with_body(tirx.Evaluate(annotated))
             annotated_source = build(tvm.IRModule({"fp4_fp8_cast": annotated_func}), tvm.target.Target("cuda")).inspect_source()
             assert "__tl_cvt_e2m1" not in annotated_source

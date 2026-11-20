@@ -743,16 +743,26 @@ private:
       class CastCheck : public StmtExprVisitor {
       public:
         CastCheck(UnitVisitor *parent) : parent_(parent) {}
-        void VisitExpr_(const CastNode *op) final {
+        void VisitExpr_(const prim::CastNode *op) final {
+          Check(*GetCastOperands(ffi::GetRef<prim::Cast>(op)));
+        }
+        void VisitExpr_(const CallNode *op) final {
+          if (op->op.same_as(tl::annotated_cast())) {
+            Check(*GetCastOperands(PrimExpr(ffi::GetRef<Call>(op))));
+          } else {
+            StmtExprVisitor::VisitExpr_(op);
+          }
+        }
+        void Check(const CastOperands &cast) {
           // Classify the *input of this Cast* with the existing lane-use
           // analysis, then hand the explicit kind to the shared planner.
           pto_analysis::LaneUseContext ctx = parent_->MakeLaneUseContext();
           std::string lane_why;
           pto_analysis::LaneUse use =
-              pto_analysis::AnalyzeLaneUse(op->value, &ctx, &lane_why);
+              pto_analysis::AnalyzeLaneUse(cast.value, &ctx, &lane_why);
           if (use == pto_analysis::LaneUse::kUnknown) {
             std::ostringstream oss;
-            oss << "Cast " << op->value.dtype() << " -> " << op->dtype
+            oss << "Cast " << cast.value.ty() << " -> " << cast.dtype
                 << " cannot classify its input: " << lane_why;
             parent_->parent_->Fail("dtype", oss.str());
             return;
@@ -766,10 +776,10 @@ private:
             context.logical_lanes = parent_->mapping_.lanes;
           }
           std::string why;
-          auto plan = pto_analysis::PlanValueCast(op, context, &why);
+          auto plan = pto_analysis::PlanValueCast(cast, context, &why);
           if (!plan.has_value()) {
             std::ostringstream oss;
-            oss << "Cast " << op->value.dtype() << " -> " << op->dtype
+            oss << "Cast " << cast.value.ty() << " -> " << cast.dtype
                 << " has no supported conversion";
             if (!why.empty()) {
               oss << ": " << why;
@@ -778,7 +788,7 @@ private:
           }
           // Nested value casts each plan independently; annotations are not
           // computation values and are validated by the planner.
-          VisitExpr(op->value);
+          VisitExpr(cast.value);
         }
         void VisitExpr_(const BufferLoadNode *) final {
           // Index casts belong to address analysis; do not descend.
