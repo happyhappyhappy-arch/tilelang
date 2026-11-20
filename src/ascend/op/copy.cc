@@ -3,6 +3,7 @@
  * \brief Ascend implementation for tl.copy lowering.
  */
 
+#include "support/cast.h"
 #include "op/copy.h"
 #include "ascend/op/copy.h"
 #include "ascend/op/utils.h"

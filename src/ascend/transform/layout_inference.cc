@@ -4,7 +4,7 @@
  */
 
 #include "support/check.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/ir/repr.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/s_tir/utils.h>
@@ -23,8 +23,8 @@
 #include <queue>
 #include <unordered_set>
 
-#include "arith/ir_mutator_with_analyzer.h"
-#include "arith/ir_visitor_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
+#include "tirx/ir_visitor_with_analyzer.h"
 #include "ascend/layout/pto_parallel_layout.h"
 #include "ascend/op/utils.h"
 #include "ascend/target_utils.h"
@@ -40,7 +40,7 @@
 #include "op/reducer.h"
 #include "op/utils.h"
 #include "span_utils.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 #include "transform/common/attr.h"
 #include "transform/common/loop_fusion_utils.h"
 #include "transform/common/pipeline_utils.h"

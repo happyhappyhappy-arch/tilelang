@@ -3,17 +3,17 @@
  * \file lower_intrin.cc
  */
 #include "support/check.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 #include <tvm/target/target.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/transform.h>
 
 #include <limits>
 #include <unordered_set>
 
-#include "arith/ir_mutator_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
 #include "arith/pattern_match.h"
 
 namespace tvm {

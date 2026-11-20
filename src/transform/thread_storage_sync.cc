@@ -22,12 +22,12 @@
  */
 #include "./common/constr_visitor.h"
 #include "./common/thread_sync_types.h"
-#include "arith/ir_mutator_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
 #include "common/attr.h"
 #include "cuda/op/builtin.h"
 #include "runtime/thread_storage_scope.h"
 #include "support/check.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 #include "tvm/ir/expr.h"
 #include <algorithm>
 #include <array>
@@ -39,11 +39,11 @@
 #include <tvm/arith/int_set.h>
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ir/attrs.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/builtin.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>

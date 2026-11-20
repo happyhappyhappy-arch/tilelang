@@ -49,7 +49,7 @@
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/buffer.h>
 #include <tvm/tirx/builtin.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
@@ -71,7 +71,7 @@
 #include "op/utils.h"
 #include "runtime/thread_storage_scope.h"
 #include "support/check.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 #include "transform/common/collector.h"
 #include "transform/common/constr_visitor.h"
 

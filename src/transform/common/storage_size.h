@@ -2,7 +2,7 @@
 #define TVM_TL_TRANSFORM_COMMON_STORAGE_SIZE_H_
 
 #include <tvm/tirx/buffer.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/op.h>
 
 #include <cstdint>

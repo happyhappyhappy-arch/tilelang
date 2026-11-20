@@ -4,7 +4,7 @@
  */
 
 #include "support/check.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/builtin.h>
@@ -17,8 +17,8 @@
 #include <variant>
 #include <vector>
 
-#include "arith/ir_mutator_with_analyzer.h"
-#include "arith/ir_visitor_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
+#include "tirx/ir_visitor_with_analyzer.h"
 
 namespace tvm {
 namespace tl {

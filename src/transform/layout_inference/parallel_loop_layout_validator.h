@@ -7,7 +7,7 @@
 #define TVM_TL_TRANSFORM_PARALLEL_LOOP_LAYOUT_VALIDATOR_H_
 
 #include "support/check.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/stmt_functor.h>
 

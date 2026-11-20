@@ -22,7 +22,7 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/runtime/logging.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/stmt.h>
 
 #include <cstdint>

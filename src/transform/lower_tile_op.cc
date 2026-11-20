@@ -5,7 +5,7 @@
 
 #include "support/check.h"
 #include <optional>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/relax/analysis.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/s_tir/utils.h>
@@ -29,7 +29,7 @@
 #include "cuda/transform/ptx_async_copy_injector.h"
 
 #include "../op/reducer.h"
-#include "arith/ir_mutator_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
 #include "common/mbarrier.h"
 #include "common/pipeline_utils.h"
 #include "loop_partition.h"

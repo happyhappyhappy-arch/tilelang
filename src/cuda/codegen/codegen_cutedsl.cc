@@ -7,7 +7,7 @@
 #include "cuda/codegen/ptx.h"
 #include "support/check.h"
 #include <tvm/arith/analyzer.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/ir/transform.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/builtin.h>

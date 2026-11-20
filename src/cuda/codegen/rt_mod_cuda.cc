@@ -6,7 +6,7 @@
 #include "support/check.h"
 #include "target/cuda/cuda_fallback_module.h"
 #include "transform/common/attr.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/ir/transform.h>
 
 namespace tvm {

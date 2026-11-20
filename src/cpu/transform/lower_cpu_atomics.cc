@@ -23,7 +23,7 @@
  */
 
 #include "support/check.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>

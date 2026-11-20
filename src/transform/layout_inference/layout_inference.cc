@@ -4,7 +4,7 @@
  */
 
 #include "support/check.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/ir/repr.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/s_tir/utils.h>
@@ -35,12 +35,12 @@
 #include "../common/loop_fusion_utils.h"
 #include "../common/pipeline_utils.h"
 #include "../common/union_find.h"
-#include "arith/ir_mutator_with_analyzer.h"
-#include "arith/ir_visitor_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
+#include "tirx/ir_visitor_with_analyzer.h"
 #include "backend/common/target_utils.h"
 #include "layout_cost_model.h"
 #include "parallel_loop_layout_validator.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 
 namespace tvm {
 namespace tl {

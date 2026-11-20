@@ -17,6 +17,7 @@
 #ifndef TVM_TL_CPU_OP_ATOMIC_RMW_H_
 #define TVM_TL_CPU_OP_ATOMIC_RMW_H_
 
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/op.h>
 

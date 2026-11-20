@@ -4,11 +4,11 @@
 // Loop vectorizer as in Halide pipeline.
 #include "support/check.h"
 #include <tvm/arith/analyzer.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/builtin.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/op_attr_types.h>
 #include <tvm/tirx/stmt.h>
@@ -27,7 +27,7 @@
 #include "backend/common/target_utils.h"
 #include "loop_vectorize.h"
 #include "tir/analysis/check_contains.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 
 namespace tvm {
 namespace tl {

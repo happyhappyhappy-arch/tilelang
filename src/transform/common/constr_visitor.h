@@ -9,7 +9,7 @@
 #include <ostream>
 #include <string>
 #include <tvm/ffi/extra/structural_hash.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 #include <tvm/s_tir/stmt.h>
 #include <tvm/tirx/analysis.h>

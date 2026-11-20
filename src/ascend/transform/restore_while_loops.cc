@@ -20,6 +20,7 @@
  * restoration.
  */
 
+#include "support/cast.h"
 #include <string>
 #include <utility>
 

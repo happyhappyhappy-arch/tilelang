@@ -17,6 +17,7 @@
  * under the License.
  */
 
+#include "support/cast.h"
 #include "./scheduled_tir.h"
 
 #include <tvm/ffi/container/array.h>

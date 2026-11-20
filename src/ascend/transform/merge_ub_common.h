@@ -25,9 +25,9 @@
 #pragma once
 
 #include <tvm/ffi/container/array.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
@@ -43,7 +43,7 @@
 #include "op/builtin.h"
 #include "runtime/thread_storage_scope.h"
 #include "support/check.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 
 namespace tvm {
 namespace tl {

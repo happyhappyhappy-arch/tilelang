@@ -10,11 +10,11 @@
 
 #include <tvm/ffi/container/map.h>
 #include <tvm/runtime/logging.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 
 #include "ascend/target_utils.h"
 #include "support/check.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 
 namespace tvm {
 namespace tl {

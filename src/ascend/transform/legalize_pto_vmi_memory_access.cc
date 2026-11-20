@@ -56,7 +56,7 @@
 #include <utility>
 #include <vector>
 
-#include "arith/ir_mutator_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
 #include "ascend/target_utils.h"
 #include "span_utils.h"
 

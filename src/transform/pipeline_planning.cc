@@ -4,7 +4,7 @@
 #include <map>
 #include <numeric>
 #include <tvm/arith/analyzer.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 #include <tvm/s_tir/stmt.h>
 #include <tvm/target/target.h>

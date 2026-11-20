@@ -1,6 +1,7 @@
 /*!
  * \file metal/codegen/codegen_metal.cc
  */
+#include "support/cast.h"
 #include "codegen_metal.h"
 #include "config.h"
 

@@ -12,7 +12,7 @@
 #ifndef TVM_TL_ASCEND_LAYOUT_PTO_INDEX_ANALYSIS_H_
 #define TVM_TL_ASCEND_LAYOUT_PTO_INDEX_ANALYSIS_H_
 
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/stmt.h>
 
 #include <stdexcept>

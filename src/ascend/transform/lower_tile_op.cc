@@ -5,7 +5,7 @@
 
 #include "support/check.h"
 #include <optional>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/relax/analysis.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/s_tir/utils.h>
@@ -30,7 +30,7 @@
 #include "op/utils.h"
 #include "span_utils.h"
 
-#include "arith/ir_mutator_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
 #include "op/reducer.h"
 #include "transform/common/attr.h"
 #include "transform/common/mbarrier.h"

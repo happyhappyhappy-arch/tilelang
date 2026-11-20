@@ -47,7 +47,7 @@
 #include "./auto_schedule/task_annotations.h"
 #include "ascend/transform/attr.h"
 #include "ascend/transform/buffer_version.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 
 namespace tvm {
 namespace tl {

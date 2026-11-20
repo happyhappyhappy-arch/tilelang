@@ -15,7 +15,7 @@
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/tirx/buffer.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/op.h>
 
 #include <optional>

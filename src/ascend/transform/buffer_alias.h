@@ -27,7 +27,7 @@
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/runtime/logging.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 
 #include <unordered_map>
 #include <unordered_set>

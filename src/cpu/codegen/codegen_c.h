@@ -14,7 +14,7 @@
 
 #include "backend/common/codegen/codegen_c_base.h"
 #include "tvm/target/codegen.h"
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 
 namespace tvm {
 namespace codegen {

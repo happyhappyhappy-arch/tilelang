@@ -6,6 +6,7 @@
  * must honor valid regions and their own padding requirements; consumers must
  * not assume all padded elements are zero.
  */
+#include "support/cast.h"
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/tirx/builtin.h>
@@ -13,7 +14,7 @@
 #include <tvm/tirx/transform.h>
 #include <unordered_set>
 
-#include "arith/ir_mutator_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
 #include "ascend/layout/ascend_layouts.h"
 #include "ascend/op/ascend_mte_plan.h"
 #include "ascend/op/copy.h"

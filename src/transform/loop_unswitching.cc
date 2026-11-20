@@ -22,7 +22,7 @@
 #include <tvm/tirx/transform.h>
 
 #include "../op/builtin.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 
 #include <unordered_map>
 #include <unordered_set>

@@ -46,7 +46,7 @@
 #include "ascend/op/utils.h"
 #include "ascend/transform/buffer_version.h"
 #include "support/check.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 #include "transform/common/constr_visitor.h"
 
 namespace tvm {

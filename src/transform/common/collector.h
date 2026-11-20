@@ -3,10 +3,10 @@
  * \brief Collect information from the IR
  */
 
-#include "arith/ir_visitor_with_analyzer.h"
+#include "tirx/ir_visitor_with_analyzer.h"
 #include "support/check.h"
 #include "tir/analysis/var_use_def_analysis.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/op.h>

@@ -22,6 +22,7 @@
  * \brief Lower scheduled TIR into final Ascend core TIR.
  */
 
+#include "support/cast.h"
 #include "./auto_schedule/kernel_rewriter.h"
 #include "./auto_schedule/scheduled_tir.h"
 #include "buffer_addresses.h"
@@ -34,7 +35,7 @@
 #include <tvm/ir/function.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/buffer.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
@@ -52,7 +53,7 @@
 #include "ascend/transform/attr.h"
 #include "op/builtin.h"
 #include "support/check.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 #include "transform/common/attr.h"
 
 namespace tvm {

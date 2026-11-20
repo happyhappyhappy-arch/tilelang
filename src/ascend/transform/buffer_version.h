@@ -25,7 +25,7 @@
 #pragma once
 
 #include <tvm/ffi/container/map.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 
 #include "ascend/op/utils.h"
 #include "transform/common/attr.h"

@@ -10,7 +10,7 @@
 #include "op/atomic_reduce.h"
 #include "support/check.h"
 #include <tvm/ffi/extra/structural_equal.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 
 #include "layout/layout.h"
 #include "op/builtin.h"

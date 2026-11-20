@@ -8,7 +8,7 @@
  * placement within the function body flexible for frontends.
  */
 #include "support/check.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/ir/transform.h>
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/stmt.h>
@@ -56,7 +56,7 @@ private:
     if (it != op->annotations.end()) {
       if (const auto *arr = (*it).second.as<ArrayObj>()) {
         // Downcast directly to Array<Var> for convenience
-        Array<Var> vars = tvm::Downcast<Array<Var>>((*it).second);
+        Array<Var> vars = tvm::tl::Downcast<Array<Var>>((*it).second);
         for (const Var &v : vars) {
           MaybeInsert(v);
         }

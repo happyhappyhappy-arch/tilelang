@@ -1,9 +1,10 @@
 #pragma once
+#include "support/cast.h"
 #include <tvm/arith/analyzer.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/buffer.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/stmt.h>
 
 #include "ascend/op/utils.h"

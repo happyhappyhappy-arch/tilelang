@@ -22,7 +22,7 @@
  * final AllocBuffer after block lowering.
  */
 
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/transform.h>

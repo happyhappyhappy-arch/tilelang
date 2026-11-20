@@ -5,7 +5,7 @@
 #ifndef TVM_TL_TRANSFORM_COMMON_ACCESS_PTR_UTILS_H_
 #define TVM_TL_TRANSFORM_COMMON_ACCESS_PTR_UTILS_H_
 
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 
 namespace tvm {
 namespace tl {

@@ -15,6 +15,7 @@
  *   ["bind",   Var, PrimExpr]                -- flat `v = expr` bind
  *   ["range",  Var, PrimExpr, PrimExpr]      -- `v in [min, min+extent)`
  */
+#include "support/cast.h"
 #include "common/constr_visitor.h"
 
 namespace tvm {

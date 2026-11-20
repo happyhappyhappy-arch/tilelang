@@ -5,7 +5,7 @@
 #include "codegen_hip.h"
 #include "support/check.h"
 #include <tvm/arith/analyzer.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/index_map.h>
 #include <tvm/tirx/op.h>

@@ -17,6 +17,7 @@
  * op.
  */
 
+#include "support/cast.h"
 #include "./preprocess_ir.h"
 
 #include <tvm/ir/op.h>

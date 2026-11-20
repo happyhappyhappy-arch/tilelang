@@ -13,6 +13,7 @@
  * through alloc_fragment, which CPU does not have).
  */
 
+#include "support/cast.h"
 #include "op/reduce.h"
 
 #include <tvm/runtime/logging.h>

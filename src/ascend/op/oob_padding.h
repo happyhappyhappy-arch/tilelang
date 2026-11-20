@@ -19,7 +19,7 @@
 #include "layout/layout.h"
 
 #include <tvm/arith/analyzer.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/stmt.h>
 
 namespace tvm {

@@ -33,6 +33,7 @@
  * without a PTO target pass through unchanged.
  */
 
+#include "support/cast.h"
 #include <tvm/arith/analyzer.h>
 #include <tvm/ir/scope_stack.h>
 #include <tvm/tirx/builtin.h>
@@ -50,7 +51,7 @@
 #include <unordered_set>
 #include <utility>
 
-#include "arith/ir_visitor_with_analyzer.h"
+#include "tirx/ir_visitor_with_analyzer.h"
 #include "tirx/transform/ir_utils.h"
 
 #include "../target_utils.h"

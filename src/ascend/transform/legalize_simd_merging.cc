@@ -23,6 +23,7 @@
  *        statements.
  */
 
+#include "support/cast.h"
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/op.h>
 #include <tvm/tirx/stmt_functor.h>

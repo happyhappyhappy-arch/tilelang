@@ -4,7 +4,7 @@
 #include "support/check.h"
 #include <tvm/ffi/extra/module.h>
 #include <tvm/ffi/function.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/device_api.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/runtime/module.h>
@@ -12,7 +12,7 @@
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/buffer.h>
 #include <tvm/tirx/builtin.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/transform.h>
@@ -26,7 +26,7 @@
 #include "../op/builtin.h"
 #include "common/attr.h"
 #include "merge_if_stmt.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 #include "tvm_ffi_binder.h"
 
 namespace tvm {

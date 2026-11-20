@@ -2,6 +2,7 @@
  * \file ascend/codegen/codegen_pto.cc
  * \brief Utility to generate PTO Python source.
  */
+#include "support/cast.h"
 #include "ascend/codegen/codegen_pto.h"
 #include "ascend/codegen/sfu_precision.h"
 #include "ascend/op/nd2nz.h"

@@ -3,6 +3,7 @@
  * \brief Mark copies whose TensorMap base pointer is defined in the body.
  */
 
+#include "support/cast.h"
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/transform.h>

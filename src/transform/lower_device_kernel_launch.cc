@@ -3,18 +3,18 @@
  * \brief Split device function from host.
  */
 #include "support/check.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/ir/transform.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/target/target.h>
 #include <tvm/tirx/builtin.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/transform.h>
 
 #include "common/storage_size.h"
 #include "runtime/thread_storage_scope.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 
 namespace tvm {
 namespace tl {

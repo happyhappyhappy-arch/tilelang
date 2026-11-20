@@ -7,7 +7,7 @@
 #include "layout_cost_model.h"
 
 #include <tvm/runtime/logging.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt_functor.h>
 

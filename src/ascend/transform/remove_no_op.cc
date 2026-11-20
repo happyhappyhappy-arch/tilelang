@@ -22,6 +22,7 @@
  * \brief Ascend-specific no-op removal.
  */
 
+#include "support/cast.h"
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/cast.h>
 #include <tvm/ffi/function.h>
@@ -39,7 +40,7 @@
 #include <utility>
 
 #include "arith/const_fold.h"
-#include "arith/ir_mutator_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
 #include "buffer_addresses.h"
 #include "tir/analysis/control_flow_graph.h"
 #include "tirx/transform/ir_utils.h"

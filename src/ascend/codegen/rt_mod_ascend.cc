@@ -1,3 +1,4 @@
+#include "support/cast.h"
 #include "codegen_ascend.h"
 #include "config.h"
 

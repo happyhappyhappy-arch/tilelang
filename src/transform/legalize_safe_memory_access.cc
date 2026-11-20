@@ -4,7 +4,7 @@
  */
 
 #include "support/check.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 #include <tvm/s_tir/utils.h>
 #include <tvm/tirx/analysis.h>
@@ -20,7 +20,7 @@
 #include "../op/builtin.h"
 #include "../op/parallel.h"
 #include "../op/utils.h"
-#include "arith/ir_mutator_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
 #include "common/access_ptr_utils.h"
 #include "loop_partition.h"
 #include "loop_vectorize.h"

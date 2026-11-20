@@ -1,3 +1,4 @@
+#include "support/cast.h"
 #include "ascend/codegen/codegen_pto.h"
 
 #include "support/check.h"

@@ -3,6 +3,7 @@
  * \brief Statement analysis shared by the warp-specialization passes.
  */
 
+#include "support/cast.h"
 #include "./ws_analysis.h"
 
 #include <tvm/tirx/builtin.h>

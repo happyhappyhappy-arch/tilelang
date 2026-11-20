@@ -22,6 +22,7 @@
  * \brief Shared schedule and synchronization dependency analysis.
  */
 
+#include "support/cast.h"
 #include "./dependency_analysis.h"
 #include "./task_annotations.h"
 #include "ascend/op/utils.h"
@@ -37,7 +38,7 @@
 #include <tvm/arith/analyzer.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/analysis.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/stmt_functor.h>
 
 #include "ascend/layout/ascend_layouts.h"

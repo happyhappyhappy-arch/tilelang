@@ -21,6 +21,7 @@
 
 #pragma once
 
+#include "support/cast.h"
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
@@ -28,7 +29,7 @@
 #include <tvm/ffi/string.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/buffer.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
@@ -48,7 +49,7 @@
 #include "ascend/transform/attr.h"
 #include "op/builtin.h"
 #include "op/utils.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 #include "transform/common/attr.h"
 
 namespace tvm {

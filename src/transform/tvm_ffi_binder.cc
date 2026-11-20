@@ -4,19 +4,19 @@
  */
 #include "tvm_ffi_binder.h"
 #include "support/check.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 
 #include <tvm/runtime/device_api.h>
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/builtin.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/op.h>
 
 #include <sstream>
 #include <unordered_set>
 
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 #include "tvm/arith/int_solver.h"
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>

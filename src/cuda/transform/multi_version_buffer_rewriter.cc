@@ -5,7 +5,7 @@
 
 #include "support/check.h"
 #include <tvm/arith/analyzer.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/s_tir/analysis.h>
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/builtin.h>

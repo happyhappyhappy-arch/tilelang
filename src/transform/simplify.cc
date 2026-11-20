@@ -6,7 +6,7 @@
 
 #include "support/check.h"
 #include <tvm/ffi/reflection/accessor.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/s_tir/utils.h>
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/buffer.h>
@@ -19,7 +19,7 @@
 #include <utility>
 
 #include "arith/const_fold.h"
-#include "arith/ir_mutator_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
 #include "common/attr.h"
 #include "tir/analysis/control_flow_graph.h"
 #include "tir/analysis/var_use_def_analysis.h"

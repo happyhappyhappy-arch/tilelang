@@ -2,7 +2,7 @@
 #include "runtime/pack_args.h"
 #include "support/check.h"
 #include "target/cuda/cuda_fallback_module.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 
 namespace tvm {
 namespace codegen {

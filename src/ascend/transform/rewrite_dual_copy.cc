@@ -22,10 +22,11 @@
  * \brief Lower Ascend dual-copy operations using the enclosing cthread sid.
  */
 
+#include "support/cast.h"
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/buffer.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt.h>

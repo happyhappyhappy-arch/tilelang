@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "support/cast.h"
 #include <array>
 #include <unordered_map>
 #include <unordered_set>

@@ -3,6 +3,7 @@
  * \brief Rewrite layout-driven Ascend ND-to-NZ copies before AutoSchedule.
  */
 
+#include "support/cast.h"
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/tirx/op.h>
@@ -14,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-#include "arith/ir_mutator_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
 #include "ascend/layout/ascend_layouts.h"
 #include "ascend/op/builtin.h"
 #include "ascend/op/nd2nz.h"

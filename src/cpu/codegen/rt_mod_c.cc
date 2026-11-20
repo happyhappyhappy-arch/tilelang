@@ -2,7 +2,7 @@
 #include "config.h"
 #include "support/check.h"
 #include <tvm/ffi/extra/module.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 
 namespace tvm {
 namespace codegen {

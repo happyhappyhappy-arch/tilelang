@@ -22,6 +22,7 @@
  *         versions after synchronization insertion.
  */
 
+#include "support/cast.h"
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/extra/structural_equal.h>
 #include <tvm/ffi/reflection/registry.h>

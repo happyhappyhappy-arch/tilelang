@@ -4,7 +4,7 @@
  */
 
 #include "support/check.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/ir/transform.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/analysis.h>
@@ -18,7 +18,7 @@
 #include <utility>
 
 #include "runtime/thread_storage_scope.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 
 #include "backend/common/target_utils.h"
 #include "cuda/op/builtin.h"

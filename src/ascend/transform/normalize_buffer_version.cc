@@ -26,7 +26,7 @@
 
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/attrs.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/transform.h>
 

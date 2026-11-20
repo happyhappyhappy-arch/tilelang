@@ -30,6 +30,7 @@
  *  T.annotate_buffer_versions({buf: 1}) removes the storage from eligibility;
  *  (1, mode) retains eligibility.
  */
+#include "support/cast.h"
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/transform.h>

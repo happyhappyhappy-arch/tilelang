@@ -37,6 +37,7 @@
  * sequence level being analyzed and applies the declared conflict polarity.
  */
 
+#include "support/cast.h"
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/op.h>
 #include <tvm/tirx/analysis.h>

@@ -4,7 +4,7 @@
  */
 
 #include "support/check.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/ir/type.h>
 #include <tvm/s_tir/analysis.h>
 #include <tvm/tirx/analysis.h>
@@ -16,7 +16,7 @@
 #include <unordered_map>
 
 #include "../op/utils.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 
 // Forward-declare tir's var-level LCA helper which has no public header.
 namespace tvm {

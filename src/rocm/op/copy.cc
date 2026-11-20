@@ -5,7 +5,7 @@
 
 #include "op/copy.h"
 #include "support/check.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 
 #include "op/utils.h"

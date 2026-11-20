@@ -5,7 +5,7 @@
  */
 #include "support/check.h"
 #include <tvm/arith/analyzer.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 #include <tvm/s_tir/analysis.h>
 #include <tvm/s_tir/stmt.h>
@@ -39,7 +39,7 @@
 #include "op/utils.h"
 #include "support/utils.h"
 #include "tir/schedule/utils.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 
 namespace tvm {
 namespace tl {

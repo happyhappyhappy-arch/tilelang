@@ -46,7 +46,7 @@
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/buffer.h>
 #include <tvm/tirx/builtin.h>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
@@ -64,7 +64,7 @@
 #include "buffer_alias.h"
 #include "buffer_version.h"
 #include "runtime/thread_storage_scope.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 #include "transform/common/attr.h"
 
 namespace tvm {

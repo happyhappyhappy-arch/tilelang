@@ -13,7 +13,7 @@
 
 #include "support/check.h"
 #include <tvm/arith/analyzer.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/s_tir/stmt.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt.h>

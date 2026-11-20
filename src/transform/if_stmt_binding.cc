@@ -3,6 +3,7 @@
  * \brief Bind the If Stmt to each Stmt in SeqStmt
  */
 
+#include "support/cast.h"
 #include "support/check.h"
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/builtin.h>

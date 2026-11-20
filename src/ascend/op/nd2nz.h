@@ -7,7 +7,7 @@
 
 #include <cstdint>
 #include <string>
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 
 namespace tvm::tl {
 

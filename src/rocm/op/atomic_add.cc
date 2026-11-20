@@ -6,7 +6,7 @@
 #include "op/atomic_add.h"
 #include "support/check.h"
 #include <tvm/ffi/extra/structural_equal.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 
 #include "backend/common/op/atomic_simt.h"
 #include "backend/common/target_utils.h"

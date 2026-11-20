@@ -32,6 +32,7 @@
  * MergeUBAllocations.
  */
 
+#include "support/cast.h"
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/tirx/analysis.h>

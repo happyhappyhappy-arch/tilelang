@@ -5,7 +5,7 @@
 
 #include "support/check.h"
 #include <tvm/ffi/extra/structural_hash.h>
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/op.h>
