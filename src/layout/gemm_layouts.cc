@@ -27,9 +27,11 @@ namespace tl {
 
 using namespace tirx;
 using namespace ffi;
+using prim::FloorDiv;
+using prim::FloorMod;
 
 IterVar MakeIterVar(std::string name, PrimExpr dom) {
-  Var var = Var(name, dom->dtype);
+  PrimVar var(name, dom.ty());
   return IterVar(Range(0, dom), var, IterVarType::kDataPar);
 }
 
@@ -400,40 +402,40 @@ struct SwizzleShapeInfo {
   int element_size;
 };
 
-SwizzleShapeInfo GetSwizzleShapeInfoChecked(const Buffer &buffer) {
+SwizzleShapeInfo GetSwizzleShapeInfoChecked(const BufferVar &buffer) {
   ICHECK(buffer.defined()) << "Swizzle layout expects a defined buffer";
-  ICHECK(buffer->shape.size() >= 2)
+  ICHECK(buffer.type()->shape.size() >= 2)
       << "Swizzle layout expects rank >= 2 buffer, got rank="
-      << buffer->shape.size();
-  size_t ndim = buffer->shape.size();
-  auto stride = as_const_int(buffer->shape[ndim - 2]);
-  auto continuous = as_const_int(buffer->shape[ndim - 1]);
+      << buffer.type()->shape.size();
+  size_t ndim = buffer.type()->shape.size();
+  auto stride = as_const_int(buffer.type()->shape[ndim - 2]);
+  auto continuous = as_const_int(buffer.type()->shape[ndim - 1]);
   ICHECK(stride && continuous)
       << "Swizzle layout requires constant last-2 dims";
-  return SwizzleShapeInfo{*stride, *continuous, buffer->dtype.bits()};
+  return SwizzleShapeInfo{*stride, *continuous, buffer.type()->dtype.bits()};
 }
 
-bool TryGetSwizzleShapeInfo(const Buffer &buffer, SwizzleShapeInfo *info) {
-  if (!buffer.defined() || buffer->shape.size() < 2) {
+bool TryGetSwizzleShapeInfo(const BufferVar &buffer, SwizzleShapeInfo *info) {
+  if (!buffer.defined() || buffer.type()->shape.size() < 2) {
     return false;
   }
-  size_t ndim = buffer->shape.size();
-  auto stride = as_const_int(buffer->shape[ndim - 2]);
-  auto continuous = as_const_int(buffer->shape[ndim - 1]);
+  size_t ndim = buffer.type()->shape.size();
+  auto stride = as_const_int(buffer.type()->shape[ndim - 2]);
+  auto continuous = as_const_int(buffer.type()->shape[ndim - 1]);
   if (!stride || !continuous) {
     return false;
   }
-  *info = SwizzleShapeInfo{*stride, *continuous, buffer->dtype.bits()};
+  *info = SwizzleShapeInfo{*stride, *continuous, buffer.type()->dtype.bits()};
   return true;
 }
 
 } // namespace
 
-static Layout ExpandLayout2D(const Layout &base, const Buffer &buffer) {
+static Layout ExpandLayout2D(const Layout &base, const BufferVar &buffer) {
   Array<PrimExpr> leading_shape;
-  leading_shape.reserve(buffer->shape.size() - 2);
-  for (size_t i = 0; i + 2 < buffer->shape.size(); ++i) {
-    leading_shape.push_back(buffer->shape[i]);
+  leading_shape.reserve(buffer.type()->shape.size() - 2);
+  for (size_t i = 0; i + 2 < buffer.type()->shape.size(); ++i) {
+    leading_shape.push_back(buffer.type()->shape[i]);
   }
   return base->Expand(leading_shape);
 }
@@ -442,8 +444,8 @@ static Layout ExpandLayout2D(const Layout &base, const Buffer &buffer) {
 static Layout MakeQuarterBankSwizzleLayout2D(int stride, int continuous,
                                              int element_size) {
   // Swizzle 1 bit
-  Var i = InputPlaceholder(0);
-  Var j = InputPlaceholder(1);
+  PrimVar i = InputPlaceholder(0);
+  PrimVar j = InputPlaceholder(1);
   int vector_size = 128 / element_size;
   // stride==4 is a truncated 4-row period used by tile::gather4/scatter4
   // (s=i%8 ∈ [0,4) is a valid subset of the 8-row XOR pattern, matching
@@ -461,7 +463,7 @@ static Layout MakeQuarterBankSwizzleLayout2D(int stride, int continuous,
   return Layout(Array<PrimExpr>{stride, continuous}, {tc, ts, index});
 }
 
-Layout MakeQuarterBankSwizzleLayout(const Buffer &buffer) {
+Layout MakeQuarterBankSwizzleLayout(const BufferVar &buffer) {
   auto info = GetSwizzleShapeInfoChecked(buffer);
   auto base = MakeQuarterBankSwizzleLayout2D(static_cast<int>(info.stride),
                                              static_cast<int>(info.continuous),
@@ -473,8 +475,8 @@ Layout MakeQuarterBankSwizzleLayout(const Buffer &buffer) {
 static Layout MakeHalfBankSwizzleLayout2D(int stride, int continuous,
                                           int element_size) {
   // Swizzle 2 bit
-  Var i = InputPlaceholder(0);
-  Var j = InputPlaceholder(1);
+  PrimVar i = InputPlaceholder(0);
+  PrimVar j = InputPlaceholder(1);
   int vector_size = 128 / element_size;
   // See MakeQuarterBankSwizzleLayout2D for stride==4 rationale.
   ICHECK(stride == 4 || stride % 8 == 0) << "stride=" << stride;
@@ -490,7 +492,7 @@ static Layout MakeHalfBankSwizzleLayout2D(int stride, int continuous,
   return Layout(Array<PrimExpr>{stride, continuous}, {tc, ts, index});
 }
 
-Layout MakeHalfBankSwizzleLayout(const Buffer &buffer) {
+Layout MakeHalfBankSwizzleLayout(const BufferVar &buffer) {
   auto info = GetSwizzleShapeInfoChecked(buffer);
   auto base = MakeHalfBankSwizzleLayout2D(static_cast<int>(info.stride),
                                           static_cast<int>(info.continuous),
@@ -502,8 +504,8 @@ Layout MakeHalfBankSwizzleLayout(const Buffer &buffer) {
 static Layout MakeFullBankSwizzleLayout2D(int stride, int continuous,
                                           int element_size) {
   // Swizzle 3 bit
-  Var i = InputPlaceholder(0);
-  Var j = InputPlaceholder(1);
+  PrimVar i = InputPlaceholder(0);
+  PrimVar j = InputPlaceholder(1);
   int vector_size = 128 / element_size;
   // See MakeQuarterBankSwizzleLayout2D for stride==4 rationale.
   ICHECK(stride == 4 || stride % 8 == 0) << "stride=" << stride;
@@ -519,7 +521,7 @@ static Layout MakeFullBankSwizzleLayout2D(int stride, int continuous,
   return Layout(Array<PrimExpr>{stride, continuous}, {tc, ts, index});
 }
 
-Layout MakeFullBankSwizzleLayout(const Buffer &buffer) {
+Layout MakeFullBankSwizzleLayout(const BufferVar &buffer) {
   auto info = GetSwizzleShapeInfoChecked(buffer);
   auto base = MakeFullBankSwizzleLayout2D(static_cast<int>(info.stride),
                                           static_cast<int>(info.continuous),
@@ -554,8 +556,8 @@ Layout makeMatrixCoreSwizzleLayout(int stride, int continuous, int element_size,
 
 Layout makeGemmABLayoutF64_Kinner(int stride, int continuous) {
   // Swizzle<2, 0, 4>
-  Var i = InputPlaceholder(0);
-  Var j = InputPlaceholder(1);
+  PrimVar i = InputPlaceholder(0);
+  PrimVar j = InputPlaceholder(1);
   PrimExpr tc = FloorDiv(j, 16);
   PrimExpr ts = FloorDiv(i, 4);
   PrimExpr c = FloorMod(j, 16);
@@ -567,8 +569,8 @@ Layout makeGemmABLayoutF64_Kinner(int stride, int continuous) {
 
 Layout makeGemmABLayoutF64_Kouter(int stride, int continuous) {
   // Swizzle<2, 2, 2>
-  Var i = InputPlaceholder(0);
-  Var j = InputPlaceholder(1);
+  PrimVar i = InputPlaceholder(0);
+  PrimVar j = InputPlaceholder(1);
   PrimExpr tc = FloorDiv(j, 16);
   PrimExpr ts = FloorDiv(i, 4);
   PrimExpr c = FloorMod(j, 16);
@@ -856,7 +858,7 @@ Layout MakeGemmABLayoutHopper(int mat_stride, int mat_continuous,
     // fallback for float64 when stride % 8 != 0
     if (mat_stride % 8 != 0)
       return MakeLinearLayout(
-          Array<PrimExpr>{Integer(mat_stride), Integer(mat_continuous)});
+          Array<PrimExpr>{IntImm::Int32(mat_stride), IntImm::Int32(mat_continuous)});
     return MakeQuarterBankSwizzleLayout2D(mat_stride, mat_continuous,
                                           element_size);
   }
@@ -876,7 +878,7 @@ Layout MakeGemmABLayoutHopper(int mat_stride, int mat_continuous,
 
   if (mat_continuous % vector_size == 0)
     return MakeLinearLayout(
-        Array<PrimExpr>{Integer(mat_stride), Integer(mat_continuous)});
+        Array<PrimExpr>{IntImm::Int32(mat_stride), IntImm::Int32(mat_continuous)});
   else
     ICHECK(0) << "Unsupported layout for Hopper with stride=" << mat_stride
               << ", continuous=" << mat_continuous
@@ -905,7 +907,7 @@ Layout MakeGemmABLayoutSm100(int mat_stride, int mat_continuous, int continuity,
 
   if (mat_continuous % vector_size == 0)
     return MakeLinearLayout(
-        Array<PrimExpr>{Integer(mat_stride), Integer(mat_continuous)});
+        Array<PrimExpr>{IntImm::Int32(mat_stride), IntImm::Int32(mat_continuous)});
   else
     ICHECK(0) << "Unsupported layout for sm100 with stride=" << mat_stride
               << ", continuous=" << mat_continuous
@@ -918,7 +920,7 @@ Layout MakeGemmABLayoutCDNA(int stride, int continuous, int element_size,
   return makeMatrixCoreSwizzleLayout(stride, continuous, element_size, kPack);
 }
 
-Layout MakeSwizzledLayout(const Buffer &buffer, bool k_inner, bool allow_pad) {
+Layout MakeSwizzledLayout(const BufferVar &buffer, bool k_inner, bool allow_pad) {
   auto info = GetSwizzleShapeInfoChecked(buffer);
   Layout base;
   if (allow_pad) {
@@ -933,7 +935,7 @@ Layout MakeSwizzledLayout(const Buffer &buffer, bool k_inner, bool allow_pad) {
   return ExpandLayout2D(base, buffer);
 }
 
-Layout MakeVoltaSwizzledLayout(const Buffer &buffer, bool is_a, bool k_inner) {
+Layout MakeVoltaSwizzledLayout(const BufferVar &buffer, bool is_a, bool k_inner) {
   auto info = GetSwizzleShapeInfoChecked(buffer);
   auto base =
       MakeGemmVoltaABLayout(static_cast<int>(info.stride),
@@ -941,7 +943,7 @@ Layout MakeVoltaSwizzledLayout(const Buffer &buffer, bool is_a, bool k_inner) {
   return ExpandLayout2D(base, buffer);
 }
 
-Layout MakeWgmmaSwizzledLayout(const Buffer &buffer, int continuity,
+Layout MakeWgmmaSwizzledLayout(const BufferVar &buffer, int continuity,
                                bool k_inner) {
   auto info = GetSwizzleShapeInfoChecked(buffer);
   if (continuity < 0)
@@ -952,7 +954,7 @@ Layout MakeWgmmaSwizzledLayout(const Buffer &buffer, int continuity,
   return ExpandLayout2D(base, buffer);
 }
 
-Layout MakeTcgen05MmaSwizzledLayout(const Buffer &buffer, int continuity,
+Layout MakeTcgen05MmaSwizzledLayout(const BufferVar &buffer, int continuity,
                                     bool k_inner) {
   auto info = GetSwizzleShapeInfoChecked(buffer);
   if (continuity < 0)
@@ -963,7 +965,7 @@ Layout MakeTcgen05MmaSwizzledLayout(const Buffer &buffer, int continuity,
   return ExpandLayout2D(base, buffer);
 }
 
-SwizzleMode DetectSwizzleMode(const Layout &layout, const Buffer &buffer) {
+SwizzleMode DetectSwizzleMode(const Layout &layout, const BufferVar &buffer) {
   SwizzleShapeInfo info;
   if (!TryGetSwizzleShapeInfo(buffer, &info)) {
     return SwizzleMode::None();
@@ -998,7 +1000,7 @@ SwizzleMode DetectSwizzleMode(const Layout &layout, const Buffer &buffer) {
 
 Optional<Layout> MergeSwizzleLayouts(const Layout &layout1,
                                      const Layout &layout2,
-                                     const Buffer &buffer) {
+                                     const BufferVar &buffer) {
   SwizzleShapeInfo info;
   if (!TryGetSwizzleShapeInfo(buffer, &info)) {
     return std::nullopt;

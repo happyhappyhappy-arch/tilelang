@@ -11,12 +11,11 @@
 #include "support/check.h"
 #include <tvm/ffi/reflection/creator.h>
 #include <tvm/ffi/reflection/enum_def.h>
-#include <tvm/ir/cast.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/stmt.h>
 
 #include <tvm/arith/analyzer.h>
-#include <tvm/script/ir_builder/tir/ir.h>
+#include <tvm/tirx/script/builder/ir.h>
 #include <tvm/tirx/analysis.h>
 
 #include <utility>
@@ -32,21 +31,21 @@ ForFrame MakeThreadBindingFrame(const std::string &name,
                                 const PrimExpr &extent,
                                 const Map<String, Any> &annotations) {
   using namespace tvm::tirx;
-  Var var = Var(name, extent->dtype);
+  Var var = Var(name, extent.ty());
   ObjectPtr<ForFrameNode> n = make_object<ForFrameNode>();
   n->vars.push_back(var);
-  n->doms.push_back(Range(make_const(extent->dtype, 0), extent));
+  n->doms.push_back(Range(MakeConst(extent.ty(), 0), extent));
   n->f_make_for_loop = [thread_tag, annotations](
                            const Array<Var> &vars, const Array<Range> &doms,
                            const Array<Optional<PrimExpr>> &steps,
                            Stmt body) -> Stmt {
     ICHECK_EQ(vars.size(), 1);
     ICHECK_EQ(doms.size(), 1);
-    IterVar iter_var(Range{nullptr}, Var(thread_tag, vars[0]->dtype),
+    IterVar iter_var(Range{nullptr}, PrimVar(thread_tag, vars[0]->ty),
                      IterVarType::kThreadIndex, thread_tag);
     Optional<PrimExpr> step =
         !steps.empty() ? steps[0] : Optional<PrimExpr>(std::nullopt);
-    return For(vars[0], doms[0]->min, doms[0]->extent, ForKind::kThreadBinding,
+    return For(vars[0].as_or_throw<PrimVar>(), doms[0]->min, doms[0]->extent, ForKind::kThreadBinding,
                body,
                /*thread_binding=*/iter_var,
                /*annotations=*/annotations,
@@ -58,21 +57,21 @@ ForFrame MakeThreadBindingFrame(const std::string &name,
 ForFrame MakeLaunchThreadFrame() {
   using namespace tvm::tirx;
   static const char *kThreadVarNames[3] = {"tx", "ty", "tz"};
-  DataType dtype = DataType::Int(32);
+  PrimType dtype = PrimType::Int(32);
   ObjectPtr<ForFrameNode> n = make_object<ForFrameNode>();
   for (int axis = 0; axis < 3; axis++) {
     n->vars.push_back(Var(kThreadVarNames[axis], dtype));
     // The extent is decided by the backend at materialization; this dom only
     // keeps the ForFrame invariants satisfied.
-    n->doms.push_back(Range(make_const(dtype, 0), make_const(dtype, 1)));
+    n->doms.push_back(Range(MakeConst(dtype, 0), MakeConst(dtype, 1)));
   }
   n->f_make_for_loop = [](const Array<Var> &vars, const Array<Range> &doms,
                           const Array<Optional<PrimExpr>> &steps,
                           Stmt body) -> Stmt {
     Array<Stmt> seq;
     for (int axis = 0; axis < static_cast<int>(vars.size()); axis++) {
-      PrimExpr thread_idx = Call(vars[axis]->dtype, launch_thread_idx(),
-                                 {IntImm(DataType::Int(32), axis)});
+      PrimExpr thread_idx = Call(vars[axis]->ty, launch_thread_idx(),
+                                 {IntImm(PrimType::Int(32), axis)});
       seq.push_back(tvm::tirx::Bind(vars[axis], thread_idx));
     }
     seq.push_back(body);
@@ -88,9 +87,9 @@ ForFrame ParallelFor(const Array<PrimExpr> &extents,
   n->vars.reserve(extents.size());
   n->doms.reserve(extents.size());
   for (const auto &extent : extents) {
-    DataType dtype = extent.dtype();
-    n->vars.push_back(Var("v", extent.dtype()));
-    n->doms.push_back(Range(make_const(dtype, 0), extent));
+    PrimType dtype = extent.ty();
+    n->vars.push_back(Var("v", extent.ty()));
+    n->doms.push_back(Range(MakeConst(dtype, 0), extent));
   }
   n->f_make_for_loop =
       [annotations](const Array<Var> &vars, const Array<Range> &doms,
@@ -99,7 +98,7 @@ ForFrame ParallelFor(const Array<PrimExpr> &extents,
     int n = vars.size();
     for (int i = n - 1; i >= 0; --i) {
       Range dom = doms[i];
-      Var var = vars[i];
+      auto var = vars[i].as_or_throw<PrimVar>();
       Optional<PrimExpr> step =
           i < steps.size() ? steps[i] : Optional<PrimExpr>(std::nullopt);
       // Only attach annotations to the outermost parallel loop.
@@ -128,7 +127,7 @@ ForFrame PipelinedFor(PrimExpr start, const PrimExpr &stop, int num_stages,
                       const Map<String, Any> &annotations) {
   using namespace tvm::tirx;
   ObjectPtr<ForFrameNode> n = make_object<ForFrameNode>();
-  DataType dtype = stop.dtype();
+  PrimType dtype = stop.ty();
   n->vars.push_back(Var("v", dtype));
   n->doms.push_back(Range(std::move(start), stop));
   n->f_make_for_loop = [=](const Array<Var> &vars, const Array<Range> &doms,
@@ -146,7 +145,7 @@ ForFrame PipelinedFor(PrimExpr start, const PrimExpr &stop, int num_stages,
       anno.Set("tl_pipeline_stage", stages);
     Optional<PrimExpr> step =
         !steps.empty() ? steps[0] : Optional<PrimExpr>(std::nullopt);
-    body = For(vars[0], doms[0]->min, doms[0]->extent, ForKind::kSerial, body,
+    body = For(vars[0].as_or_throw<PrimVar>(), doms[0]->min, doms[0]->extent, ForKind::kSerial, body,
                /*thread_binding=*/std::nullopt, /*annotations=*/anno,
                /*step=*/step);
     return body;
@@ -169,7 +168,7 @@ ForFrame PersistentFor(const Array<PrimExpr> &domain, const PrimExpr &wave_size,
 
   PrimExpr last_extent = domain[domain.size() - 1];
   group_size =
-      max(make_const(group_size.dtype(), 1), min(group_size, last_extent));
+      max(MakeConst(group_size.ty(), 1), min(group_size, last_extent));
   Array<PrimExpr> grouped_domain;
   grouped_domain.push_back(ceildiv(last_extent, group_size));
   for (int i = 0; i < domain.size() - 1; ++i) {
@@ -182,15 +181,15 @@ ForFrame PersistentFor(const Array<PrimExpr> &domain, const PrimExpr &wave_size,
   }
 
   auto waves = ceildiv(padded_domain_size, wave_size);
-  auto loop_var = Var("w", waves.dtype());
+  auto loop_var = PrimVar("w", waves.ty());
   Array<Var> coord_vars;
 
   for (int i = 0; i < domain.size(); ++i) {
-    DataType dtype = domain[i].dtype();
+    PrimType dtype = domain[i].ty();
     Var coord("v" + std::to_string(i), dtype);
     coord_vars.push_back(coord);
     n->vars.push_back(coord);
-    n->doms.push_back(Range(make_const(dtype, 0), domain[i]));
+    n->doms.push_back(Range(MakeConst(dtype, 0), domain[i]));
   }
 
   n->f_make_for_loop = [=](const Array<Var> &vars, const Array<Range> &doms,
@@ -216,7 +215,7 @@ ForFrame PersistentFor(const Array<PrimExpr> &domain, const PrimExpr &wave_size,
 
     arith::Analyzer analyzer;
     Stmt new_body = guarded_body;
-    if (analyzer.CanProveGreaterEqual(waves, 2)) {
+    if (analyzer->CanProveGreaterEqual(waves, 2)) {
       PrimExpr in_padded_domain =
           (loop_var * wave_size + index) < padded_domain_size;
       new_body = tvm::tirx::IfThenElse(in_padded_domain, guarded_body, Stmt());
@@ -265,7 +264,7 @@ KernelLaunchFrame KernelLaunch(const Array<PrimExpr> &grid_size,
     Array<PrimExpr> block_size = block_size_opt.value();
     ICHECK(block_size.size() <= 3);
     while (block_size.size() < 3) {
-      block_size.push_back(IntImm(DataType::Int(32), 1));
+      block_size.push_back(IntImm(PrimType::Int(32), 1));
     }
     n->thread_extents = block_size;
     block_annotations.Set(attr::kLaunchThreads, block_size);
@@ -336,7 +335,7 @@ WarpSpecializeFrame WarpSpecialize(const Array<IntImm> &warp_group_ids,
   std::vector<int> warp_groups;
   warp_groups.reserve(warp_group_ids.size());
   for (int i = 0; i < warp_group_ids.size(); i++) {
-    warp_groups.push_back(Downcast<IntImm>(warp_group_ids[i])->value);
+    warp_groups.push_back(warp_group_ids[i]->value);
   }
   std::sort(warp_groups.begin(), warp_groups.end());
 
@@ -346,7 +345,7 @@ WarpSpecializeFrame WarpSpecialize(const Array<IntImm> &warp_group_ids,
     // and no range constraint is emitted. Treated as a group index instead, it
     // would build the empty range [-warp_group_size, 0) and the region would
     // run on no thread at all, dropping every store inside it.
-    condition = IntImm(DataType::Bool(), 1);
+    condition = IntImm(PrimType::Bool(), 1);
   } else {
     // Merge consecutive groups
     std::vector<std::pair<int, int>> merged;
@@ -359,20 +358,20 @@ WarpSpecializeFrame WarpSpecialize(const Array<IntImm> &warp_group_ids,
     }
 
     for (const auto &[start, end] : merged) {
-      PrimExpr min_bound = IntImm(thread_idx.dtype(), start) * warp_group_size;
-      PrimExpr max_bound = IntImm(thread_idx.dtype(), end) * warp_group_size;
+      PrimExpr min_bound = IntImm(thread_idx.ty(), start) * warp_group_size;
+      PrimExpr max_bound = IntImm(thread_idx.ty(), end) * warp_group_size;
       PrimExpr range_cond =
           (thread_idx >= min_bound) && (thread_idx < max_bound);
 
       if (condition.defined()) {
-        condition = tirx::Or(condition, range_cond);
+        condition = prim::Or(condition, range_cond);
       } else {
         condition = range_cond;
       }
     }
   }
   IfFrame if_frame = If(condition);
-  AttrFrame attr_frame = Attr(Integer(0), "warp_specialize", Integer(1));
+  AttrFrame attr_frame = Attr(IntImm::Int32(0), "warp_specialize", IntImm::Int32(1));
   n->frames.push_back(if_frame);
   n->frames.push_back(Then());
   n->frames.push_back(attr_frame);
@@ -414,7 +413,7 @@ void WSRoleNode::RegisterReflection() {
       .def_ro("max_nreg", &WSRoleNode::max_nreg);
 }
 
-WSPipeline::WSPipeline(String name, Array<tirx::Buffer> buffers,
+WSPipeline::WSPipeline(String name, Array<tirx::BufferVar> buffers,
                        int64_t depth) {
   auto n = make_object<WSPipelineNode>();
   n->name = std::move(name);
@@ -527,7 +526,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              return WSRole(std::move(name), warp_lo, warp_hi, max_nreg);
            })
       .def("tl.WSPipeline",
-           [](String name, Array<tirx::Buffer> buffers, int64_t depth) {
+           [](String name, Array<tirx::BufferVar> buffers, int64_t depth) {
              return WSPipeline(std::move(name), std::move(buffers), depth);
            })
       .def("tl.WSOpRef", [](String id) { return WSOpRef(std::move(id)); })

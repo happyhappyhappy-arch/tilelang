@@ -422,9 +422,9 @@ if(USE_Z3 AND USE_PYPI_Z3)
   find_package(Z3 REQUIRED)
 endif()
 
-# Enable custom logging so we control the output format (e.g. strip build paths
-# from __FILE__ so wheel users don't see CI machine paths in warnings).
-set(USE_CUSTOM_LOGGING ON CACHE BOOL "Use custom logging implementation" FORCE)
+# TVM 0.27's custom logging option also configures the removed
+# tvm_libinfo_objs target. Apply the same definitions to its live targets below.
+set(USE_CUSTOM_LOGGING OFF CACHE BOOL "Configured by TileLang" FORCE)
 
 # Detect release (wheel) builds: in CI (cibuildwheel) or scikit-build-core wheel builds,
 # we strip source paths from LOG(WARNING) etc. for a cleaner user experience.
@@ -438,6 +438,9 @@ option(TILELANG_RELEASE_BUILD "Strip source paths from log messages (for wheel r
 
 # Include tvm after configs have been populated
 add_subdirectory(${TVM_SOURCE} tvm EXCLUDE_FROM_ALL)
+foreach(tvm_target IN ITEMS tvm_objs tvm_runtime_objs tvm_compiler tvm_runtime)
+  target_compile_definitions(${tvm_target} PUBLIC TVM_LOG_CUSTOMIZE=1)
+endforeach()
 
 # Strip the hardcoded /Zi PRIVATE option that tvm-ffi attaches in its
 # tvm_ffi_add_msvc_flags() helper. It overrides our Embedded debug info

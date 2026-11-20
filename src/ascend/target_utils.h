@@ -8,7 +8,7 @@
 
 #include <cstdint>
 
-#include <tvm/runtime/data_type.h>
+#include <tvm/ir/base_expr.h>
 #include <tvm/target/target.h>
 
 namespace tvm {
@@ -25,7 +25,7 @@ bool TargetIsAscend(Target target);
 // Whether the target selects PTO codegen within the Ascend architecture
 // ("ascend" kind + "pto" in target keys). Mirrors Python target_is_pto.
 bool TargetIsPTO(Target target);
-bool IsAscendVectorizableFP8(DataType dtype);
+bool IsAscendVectorizableFP8(PrimType dtype);
 
 } // namespace tl
 } // namespace tvm

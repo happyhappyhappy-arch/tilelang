@@ -22,9 +22,8 @@
 
 #include "support/check.h"
 #include <tvm/ffi/reflection/creator.h>
-#include <tvm/ir/cast.h>
 #include <tvm/runtime/logging.h>
-#include <tvm/script/ir_builder/tir/ir.h>
+#include <tvm/tirx/script/builder/ir.h>
 #include <tvm/tirx/stmt.h>
 
 #include <string>

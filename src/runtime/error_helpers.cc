@@ -4,7 +4,8 @@
 #include "error_helpers.h"
 #include "support/check.h"
 
-#include <tvm/runtime/data_type.h>
+#include <tvm/ffi/dtype.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/device_api.h>
 
 #include <sstream>
@@ -21,12 +22,12 @@ static int DTypeMismatch(const String &kernel_name, const String &buffer_name,
                          int64_t actual_code, int64_t actual_bits,
                          int64_t actual_lanes, int64_t expect_code,
                          int64_t expect_bits, int64_t expect_lanes) {
-  tvm::runtime::DataType actual(static_cast<int>(actual_code),
-                                static_cast<int>(actual_bits),
-                                static_cast<int>(actual_lanes));
-  tvm::runtime::DataType expect(static_cast<int>(expect_code),
-                                static_cast<int>(expect_bits),
-                                static_cast<int>(expect_lanes));
+  DLDataType actual{static_cast<uint8_t>(actual_code),
+                    static_cast<uint8_t>(actual_bits),
+                    static_cast<uint16_t>(actual_lanes)};
+  DLDataType expect{static_cast<uint8_t>(expect_code),
+                    static_cast<uint8_t>(expect_bits),
+                    static_cast<uint16_t>(expect_lanes)};
   std::ostringstream os;
   os << "kernel " << std::string(kernel_name) << " input "
      << std::string(buffer_name) << " dtype expected " << expect << ", but got "
@@ -40,12 +41,12 @@ static int DTypeMismatch(const String &kernel_name, const String &buffer_name,
 static int DTypeMismatchNoNames(int64_t actual_code, int64_t actual_bits,
                                 int64_t actual_lanes, int64_t expect_code,
                                 int64_t expect_bits, int64_t expect_lanes) {
-  tvm::runtime::DataType actual(static_cast<int>(actual_code),
-                                static_cast<int>(actual_bits),
-                                static_cast<int>(actual_lanes));
-  tvm::runtime::DataType expect(static_cast<int>(expect_code),
-                                static_cast<int>(expect_bits),
-                                static_cast<int>(expect_lanes));
+  DLDataType actual{static_cast<uint8_t>(actual_code),
+                    static_cast<uint8_t>(actual_bits),
+                    static_cast<uint16_t>(actual_lanes)};
+  DLDataType expect{static_cast<uint8_t>(expect_code),
+                    static_cast<uint8_t>(expect_bits),
+                    static_cast<uint16_t>(expect_lanes)};
   std::ostringstream os;
   os << "dtype mismatch: expected " << expect << ", but got " << actual;
   TVMFFIErrorSetRaisedFromCStr("RuntimeError", os.str().c_str());

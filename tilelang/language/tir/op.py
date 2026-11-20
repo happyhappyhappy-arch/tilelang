@@ -198,7 +198,7 @@ def call_intrin(dtype, func_name, *args, annotations=None, span=None):
         The call expression.
     """
     args = _normalize_primexpr_args(args)
-    return _tvm_op.call_intrin(dtype, func_name, *args, annotations=annotations, span=span)
+    return _tvm_op.call_intrin(dtype, func_name, *args, attrs=annotations, span=span)
 
 
 def call_pure_extern(dtype, func_name, *args, span=None):

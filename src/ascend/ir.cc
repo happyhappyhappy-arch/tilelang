@@ -22,7 +22,7 @@
 #include "ir.h"
 
 #include <tvm/ffi/reflection/creator.h>
-#include <tvm/script/ir_builder/tir/ir.h>
+#include <tvm/tirx/script/builder/ir.h>
 #include <tvm/tirx/stmt.h>
 
 #include "support/check.h"
@@ -111,7 +111,7 @@ static size_t RecordParentAllocCount() {
  * @param parent_alloc_count  The alloc_buffers count recorded at
  *                            EnterWithScope time via RecordParentAllocCount().
  */
-static ffi::Array<tvm::tirx::Buffer>
+static ffi::Array<tvm::tirx::BufferVar>
 StealAllocBuffers(size_t parent_alloc_count) {
   using namespace tvm::tirx;
   script::ir_builder::IRBuilder builder =
@@ -128,8 +128,8 @@ StealAllocBuffers(size_t parent_alloc_count) {
     return {};
   }
 
-  ffi::Array<Buffer> stolen;
-  ffi::Array<Buffer> remaining;
+  ffi::Array<BufferVar> stolen;
+  ffi::Array<BufferVar> remaining;
   for (size_t i = 0; i < total; ++i) {
     if (i < parent_alloc_count) {
       remaining.push_back(parent->alloc_buffers[i]);
@@ -173,8 +173,8 @@ public:
 
     auto make_thread_extent = [](const Var &var, const String &thread_tag,
                                  const PrimExpr &extent, Stmt inner) {
-      DataType dtype = extent.dtype();
-      IterVar iv(Range::FromMinExtent(make_zero(dtype), extent), var,
+      PrimType dtype = extent.ty();
+      IterVar iv(Range::FromMinExtent(MakeConst(dtype, 0), extent), var.as_or_throw<PrimVar>(),
                  IterVarType::kThreadIndex, thread_tag);
       return AttrStmt(iv, tirx::attr::thread_extent, extent, inner);
     };
@@ -189,8 +189,8 @@ public:
     // SimtVF scope marker: placed inside thread extents (innermost),
     // so that StorageRewrite attaches local.fragment allocations here.
     // This keeps fragments inside the VF function as local variables.
-    body = AttrStmt(StringImm("simtvf"), "tl.simtvf_scope",
-                    IntImm(DataType::Int(32), 1), std::move(body));
+    body = AttrStmt(prim::StringImm("simtvf"), "tl.simtvf_scope",
+                    IntImm(PrimType::Int(32), 1), std::move(body));
 
     body = make_thread_extent(thread_vars[2], "threadIdx.z", thread_extents[2],
                               std::move(body));
@@ -201,10 +201,10 @@ public:
 
     ffi::Map<ffi::String, ffi::Any> simtvf_annotations;
     simtvf_annotations.Set("tl.vf_source_index",
-                           IntImm(DataType::Int(64), source_index_));
+                           IntImm(PrimType::Int(64), source_index_));
     if (vf_latency_ > 0) {
       simtvf_annotations.Set("tl.vf_latency",
-                             IntImm(DataType::Int(64), vf_latency_));
+                             IntImm(PrimType::Int(64), vf_latency_));
     }
     Stmt stmt = SBlock({}, {}, {}, "SIMT_VF", body, std::nullopt, stolen_bufs,
                        {}, simtvf_annotations);
@@ -242,7 +242,7 @@ SimtVFFrame SimtVF(const Array<PrimExpr> &thread_extents, int64_t vf_latency,
       << "SimtVF requires exactly 3 thread extents [tx, ty, tz]";
   ObjectPtr<SimtVFFrameNode> n = tvm::ffi::make_object<SimtVFFrameNode>();
   n->thread_extents = thread_extents;
-  DataType dtype = DataType::Int(32);
+  PrimType dtype = PrimType::Int(32);
   n->thread_vars = {
       Var("simtvf_tx", dtype),
       Var("simtvf_ty", dtype),
@@ -284,21 +284,21 @@ public:
     // SimdVF scope marker: placed inside the Block body so that
     // fragment allocations (stolen into alloc_buffers) stay inside
     // the helper function during codegen.
-    body = AttrStmt(StringImm("simdvf"), "tl.simdvf_scope",
-                    IntImm(DataType::Int(32), 1), std::move(body));
+    body = AttrStmt(prim::StringImm("simdvf"), "tl.simdvf_scope",
+                    IntImm(PrimType::Int(32), 1), std::move(body));
 
     // No thread extent AttrStmts — SimdVF has no thread dimensions.
 
     ffi::Map<ffi::String, ffi::Any> simdvf_annotations;
     simdvf_annotations.Set("tl.vf_source_index",
-                           IntImm(DataType::Int(64), source_index_));
+                           IntImm(PrimType::Int(64), source_index_));
     // Logical lane count for the PTO SIMD vector path (64/128/256). AscendC
     // lowering ignores it and keeps its physical register width.
     simdvf_annotations.Set("tl.simdvf_lanes",
-                           IntImm(DataType::Int(64), lanes_));
+                           IntImm(PrimType::Int(64), lanes_));
     if (vf_latency_ > 0) {
       simdvf_annotations.Set("tl.vf_latency",
-                             IntImm(DataType::Int(64), vf_latency_));
+                             IntImm(PrimType::Int(64), vf_latency_));
     }
     Stmt stmt = SBlock({}, {}, {}, "SIMD_VF", body, std::nullopt, stolen_bufs,
                        {}, simdvf_annotations);
@@ -434,9 +434,9 @@ public:
 
     Stmt body = tvm::tirx::SeqStmt::Flatten(stmts);
 
-    DataType dtype = DataType::Int(32);
+    PrimType dtype = PrimType::Int(32);
     PrimExpr extent = IntImm(dtype, vector_count);
-    IterVar iv(Range::FromMinExtent(make_zero(dtype), extent), sid_var,
+    IterVar iv(Range::FromMinExtent(MakeConst(dtype, 0), extent), sid_var.as_or_throw<PrimVar>(),
                IterVarType::kThreadIndex, "cthread");
     body = AttrStmt(iv, tirx::attr::thread_extent, extent, body);
 
@@ -477,7 +477,7 @@ VectorFrame Vector(int vector_count) {
       << "Vector core count must be 1 or 2, got " << vector_count;
   auto n = tvm::ffi::make_object<VectorFrameNode>();
   n->vector_count = vector_count;
-  n->sid_var = tvm::tirx::Var("sid", DataType::Int(32));
+  n->sid_var = tvm::tirx::Var("sid", PrimType::Int(32));
   return VectorFrame(n);
 }
 

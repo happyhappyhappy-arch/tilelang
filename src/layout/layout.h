@@ -122,8 +122,8 @@ public:
   // to be contiguous and aligned at the new element width.
   virtual Layout Reshape(const ffi::Array<PrimExpr> &shape,
                          arith::Analyzer *analyzer = nullptr,
-                         const PrimExpr rescale_num = Integer(1),
-                         const PrimExpr rescale_den = Integer(1)) const;
+                         const PrimExpr rescale_num = IntImm::Int32(1),
+                         const PrimExpr rescale_den = IntImm::Int32(1)) const;
 
   virtual std::pair<Layout, arith::IterMapLevel>
   InverseWithLevel(bool require_padding_guard = false) const;
@@ -148,7 +148,7 @@ public:
       kTVMFFISEqHashKindTreeNode;
 
 protected:
-  virtual ffi::Map<tirx::Var, Range> GetVarMap() const;
+  virtual ffi::Map<tirx::PrimVar, Range> GetVarMap() const;
   void UpdateAnalyzer(arith::Analyzer *analyzer) const;
   ffi::Array<PrimExpr> forward_index_;
   ffi::Array<PrimExpr> input_size_;
@@ -183,8 +183,8 @@ public:
 
   Layout Reshape(const ffi::Array<PrimExpr> &shape,
                  arith::Analyzer *analyzer = nullptr,
-                 const PrimExpr rescale_num = Integer(1),
-                 const PrimExpr rescale_den = Integer(1)) const;
+                 const PrimExpr rescale_num = IntImm::Int32(1),
+                 const PrimExpr rescale_den = IntImm::Int32(1)) const;
 
   std::pair<Layout, arith::IterMapLevel>
   InverseWithLevel(bool require_padding_guard = false) const final;
@@ -231,7 +231,7 @@ public:
       kTVMFFISEqHashKindTreeNode;
 
 protected:
-  ffi::Map<tirx::Var, Range> GetVarMap() const final;
+  ffi::Map<tirx::PrimVar, Range> GetVarMap() const final;
   Range thread_range_;
   PrimExpr forward_thread_;
   PrimExpr replicate_size_;
@@ -249,7 +249,7 @@ public:
   TVM_DLL Fragment(ffi::Array<PrimExpr> input_size,
                    ffi::Array<PrimExpr> forward_index, PrimExpr forward_thread,
                    PrimExpr replicate_size,
-                   ffi::Optional<tirx::Var> replicate_var);
+                   ffi::Optional<tirx::PrimVar> replicate_var);
 
   /*!
    * \brief Create a fully replicated fragment layout.
@@ -339,7 +339,7 @@ public:
                           ffi::Array<PrimExpr> forward_index,
                           PrimExpr forward_thread, PrimExpr replicate_size,
                           PrimExpr combine_size,
-                          ffi::Optional<tirx::Var> replicate_var,
+                          ffi::Optional<tirx::PrimVar> replicate_var,
                           ffi::Optional<Range> thread_range = std::nullopt);
 
   /*! \brief Reinterpret a solved Fragment as per-thread partials whose
@@ -381,8 +381,8 @@ std::pair<Fragment, PrimExpr>
 CondenseReplicateVarKeepingBoundary(const Fragment &fragment,
                                     const PrimExpr &combine_size);
 
-tirx::Var InputPlaceholder(size_t idx);
-tirx::Var ReplicationPlaceholder();
+tirx::PrimVar InputPlaceholder(size_t idx);
+tirx::PrimVar ReplicationPlaceholder();
 tirx::IterVar MakeIterVar(std::string name, PrimExpr dom);
 
 Fragment MakeGemmFragment8x8();
@@ -439,26 +439,26 @@ Layout MakeTensorOpMultiplicand(int mat_stride, int mat_continuous,
 Layout MakeGemmSparseAmpereABLayout(int mat_stride, int mat_continuous,
                                     int elementsize);
 
-Layout MakeSwizzledLayout(const tirx::Buffer &buffer, bool k_inner = true,
+Layout MakeSwizzledLayout(const tirx::BufferVar &buffer, bool k_inner = true,
                           bool allow_pad = true);
-Layout MakeVoltaSwizzledLayout(const tirx::Buffer &buffer, bool is_a = true,
+Layout MakeVoltaSwizzledLayout(const tirx::BufferVar &buffer, bool is_a = true,
                                bool k_inner = true);
-Layout MakeWgmmaSwizzledLayout(const tirx::Buffer &buffer, int continuity = -1,
+Layout MakeWgmmaSwizzledLayout(const tirx::BufferVar &buffer, int continuity = -1,
                                bool k_inner = true);
-Layout MakeTcgen05MmaSwizzledLayout(const tirx::Buffer &buffer,
+Layout MakeTcgen05MmaSwizzledLayout(const tirx::BufferVar &buffer,
                                     int continuity = -1, bool k_inner = true);
-Layout MakeFullBankSwizzleLayout(const tirx::Buffer &buffer);
-Layout MakeHalfBankSwizzleLayout(const tirx::Buffer &buffer);
-Layout MakeQuarterBankSwizzleLayout(const tirx::Buffer &buffer);
+Layout MakeFullBankSwizzleLayout(const tirx::BufferVar &buffer);
+Layout MakeHalfBankSwizzleLayout(const tirx::BufferVar &buffer);
+Layout MakeQuarterBankSwizzleLayout(const tirx::BufferVar &buffer);
 
 // Detect which swizzle mode a layout uses
-SwizzleMode DetectSwizzleMode(const Layout &layout, const tirx::Buffer &buffer);
+SwizzleMode DetectSwizzleMode(const Layout &layout, const tirx::BufferVar &buffer);
 
 // Merge two swizzle layouts by taking the smaller granularity
 // Returns NullOpt if either layout is not a swizzle layout
 ffi::Optional<Layout> MergeSwizzleLayouts(const Layout &layout1,
                                           const Layout &layout2,
-                                          const tirx::Buffer &buffer);
+                                          const tirx::BufferVar &buffer);
 
 namespace attr {
 // BlockAttr, Containing the layout for all the buffers in the block

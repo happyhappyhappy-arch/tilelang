@@ -17,6 +17,8 @@
 namespace tvm {
 namespace tl {
 
+using namespace prim;
+
 using namespace tirx;
 using namespace ffi;
 using namespace arith;
@@ -95,29 +97,29 @@ std::optional<int64_t> EvaluateConstantInteger(const PrimExpr &expr) {
     }
   } else if (const auto *op = expr.as<CallNode>()) {
     if (op->args.size() == 2) {
-      auto lhs = EvaluateConstantInteger(op->args[0]);
-      auto rhs = EvaluateConstantInteger(op->args[1]);
+      auto lhs = EvaluateConstantInteger(op->args[0].as_or_throw<PrimExpr>());
+      auto rhs = EvaluateConstantInteger(op->args[1].as_or_throw<PrimExpr>());
       if (lhs && rhs) {
-        if (op->op.same_as(builtin::bitwise_xor())) {
+        if (op->op.same_as(tvm::prim::builtin::bitwise_xor())) {
           return *lhs ^ *rhs;
         }
-        if (op->op.same_as(builtin::bitwise_and())) {
+        if (op->op.same_as(tvm::prim::builtin::bitwise_and())) {
           return *lhs & *rhs;
         }
-        if (op->op.same_as(builtin::bitwise_or())) {
+        if (op->op.same_as(tvm::prim::builtin::bitwise_or())) {
           return *lhs | *rhs;
         }
-        if (op->op.same_as(builtin::shift_left())) {
+        if (op->op.same_as(tvm::prim::builtin::shift_left())) {
           ICHECK(*rhs >= 0 && *rhs < 64);
           return *lhs << *rhs;
         }
-        if (op->op.same_as(builtin::shift_right())) {
+        if (op->op.same_as(tvm::prim::builtin::shift_right())) {
           ICHECK(*rhs >= 0 && *rhs < 64);
           return *lhs >> *rhs;
         }
       }
-    } else if (op->args.size() == 1 && op->op.same_as(builtin::bitwise_not())) {
-      if (auto value = EvaluateConstantInteger(op->args[0])) {
+    } else if (op->args.size() == 1 && op->op.same_as(tvm::prim::builtin::bitwise_not())) {
+      if (auto value = EvaluateConstantInteger(op->args[0].as_or_throw<PrimExpr>())) {
         return ~*value;
       }
     }
@@ -180,7 +182,7 @@ public:
 Array<IterSplitExpr> get_unused_iters(const IterMark &mark,
                                       const std::vector<IterSplitExpr> &splits,
                                       Analyzer *analyzer) {
-  PrimExpr expected_lower_factor = make_const(mark->source->dtype, 1);
+  PrimExpr expected_lower_factor = MakeConst(mark->source.ty(), 1);
   std::vector<bool> used(splits.size(), false);
   std::vector<IterSplitExpr> results;
   size_t i = 0;
@@ -190,7 +192,7 @@ Array<IterSplitExpr> get_unused_iters(const IterMark &mark,
     for (; j < splits.size(); ++j) {
       if (used[j])
         continue;
-      if (!used[j] && analyzer->CanProveEqual(splits[j]->lower_factor,
+      if (!used[j] && (*analyzer)->CanProveEqual(splits[j]->lower_factor,
                                               expected_lower_factor)) {
         break;
       }
@@ -208,7 +210,7 @@ Array<IterSplitExpr> get_unused_iters(const IterMark &mark,
           << " and " << expected_lower_factor;
       results.emplace_back(
           mark, expected_lower_factor,
-          analyzer->Simplify(
+          (*analyzer)->Simplify(
               FloorDiv(splits[lowest]->lower_factor, expected_lower_factor)),
           1);
       expected_lower_factor = splits[lowest]->lower_factor;
@@ -216,19 +218,19 @@ Array<IterSplitExpr> get_unused_iters(const IterMark &mark,
       used[j] = true;
       i++;
       expected_lower_factor =
-          analyzer->Simplify(splits[j]->lower_factor * splits[j]->extent);
+          (*analyzer)->Simplify(splits[j]->lower_factor * splits[j]->extent);
     }
   }
   // Iter split normalization may over-approximate the original mark span.
   // Treat over-coverage as fully covered instead of synthesizing a zero-extent
   // leftover iterator, which later normalizes into division by zero.
   bool covers_full_iter =
-      analyzer->CanProveEqual(expected_lower_factor, mark->extent) ||
-      analyzer->CanProve(expected_lower_factor > mark->extent);
+      (*analyzer)->CanProveEqual(expected_lower_factor, mark->extent) ||
+      (*analyzer)->CanProve(expected_lower_factor > mark->extent);
   if (!covers_full_iter) {
     results.emplace_back(
         mark, expected_lower_factor,
-        analyzer->Simplify(FloorDiv(mark->extent, expected_lower_factor)), 1);
+        (*analyzer)->Simplify(FloorDiv(mark->extent, expected_lower_factor)), 1);
   }
   return results;
 }
@@ -248,7 +250,7 @@ struct IterExprPP {
     } else if (auto *split = expr.as<IterSplitExprNode>()) {
       return Visit_(split);
     } else if (auto *var = expr.as<VarNode>()) {
-      return var->name_hint;
+      return var->name;
     } else {
       std::stringstream ss;
       ss << "<UNKNOWN: " << expr << ">";
@@ -319,7 +321,7 @@ Array<IterSplitExpr> DivideUnusedIterators(const Array<PrimExpr> &exprs,
                                            const Array<IterVar> input_iters,
                                            Analyzer *analyzer) {
   auto iter_sum = exprs.Map([&](const PrimExpr &e) {
-    return NormalizeToIterSum(e, ToVMap(input_iters), analyzer);
+    return NormalizeToIterSum(e, ToVMap(input_iters), *analyzer);
   });
   IterMarkSplitCollector collector;
   collector.Collect(iter_sum);
@@ -409,7 +411,7 @@ std::pair<PrimExpr, IterVar> CompressIterator(const PrimExpr &expr,
                                               const Var &var,
                                               arith::Analyzer *analyzer) {
   auto iter_sum =
-      arith::NormalizeToIterSum(expr, ToVMap(input_iters), analyzer);
+      arith::NormalizeToIterSum(expr, ToVMap(input_iters), *analyzer);
   IterMarkSplitCollector collector;
   collector.Collect({iter_sum});
   IterMark mark;
@@ -429,9 +431,9 @@ std::pair<PrimExpr, IterVar> CompressIterator(const PrimExpr &expr,
   for (const auto &split : splits) {
     extent *= split->extent;
   }
-  extent = analyzer->Simplify(extent);
+  extent = (*analyzer)->Simplify(extent);
 
-  auto new_var = Var(var->name_hint, var->type_annotation);
+  auto new_var = PrimVar(var->name, var->ty);
   auto new_iter_var = IterVar(Range(0, extent), new_var, IterVarType::kDataPar);
   auto new_mark = IterMark(new_var, extent);
   PrimExpr scale = 1;
@@ -445,12 +447,12 @@ std::pair<PrimExpr, IterVar> CompressIterator(const PrimExpr &expr,
 
   IterSumMutator mutator(replace_map);
   PrimExpr reaplced =
-      analyzer->Simplify(NormalizeIterMapToExpr(mutator.Mutate(iter_sum)));
+      (*analyzer)->Simplify(NormalizeIterMapToExpr(mutator.Mutate(iter_sum)));
 
   return {reaplced, new_iter_var};
 }
 
-Array<IterVar> ToIterVars(const Map<Var, Range> &vmap) {
+Array<IterVar> ToIterVars(const Map<PrimVar, Range> &vmap) {
   Array<IterVar> result;
   for (const auto &[var, range] : vmap) {
     result.push_back(IterVar(range, var, IterVarType::kDataPar));
@@ -458,8 +460,8 @@ Array<IterVar> ToIterVars(const Map<Var, Range> &vmap) {
   return result;
 }
 
-Map<Var, Range> ToVMap(const Array<IterVar> &ivs) {
-  Map<Var, Range> result;
+Map<PrimVar, Range> ToVMap(const Array<IterVar> &ivs) {
+  Map<PrimVar, Range> result;
   for (const auto &iv : ivs) {
     result.Set(iv->var, iv->dom);
   }
@@ -509,16 +511,16 @@ bool ProveFragmentContains(Fragment small_frag, Fragment large_frag,
     }
     // Check each physical index component for equality.
     for (size_t i = 0; i < small_physical.size(); i++) {
-      auto diff = analyzer.Simplify(small_physical[i] - large_physical[i]);
-      if (!analyzer.CanProve(diff == 0)) {
+      auto diff = analyzer->Simplify(small_physical[i] - large_physical[i]);
+      if (!analyzer->CanProve(diff == 0)) {
         return false;
       }
     }
   }
 
-  Var rep_small("__checking_frag_contains_rep");
-  analyzer.Bind(rep_small,
-                Range(IntImm(small_frag->ReplicateExtent()->dtype, 0),
+  PrimVar rep_small("__checking_frag_contains_rep");
+  analyzer->Bind(rep_small,
+                Range(IntImm(small_frag->ReplicateExtent().ty(), 0),
                       small_frag->ReplicateExtent()),
                 true); // Bind the replicate extent of small_frag.
   // Derive thread for small_frag.
@@ -543,9 +545,9 @@ bool ProveFragmentContains(Fragment small_frag, Fragment large_frag,
       large_frag->ForwardThread(large_frag_indices, inv_large_frag_rep);
 
   // Simplify the difference between the threads.
-  auto diff = analyzer.Simplify(thread - check_thread);
+  auto diff = analyzer->Simplify(thread - check_thread);
   // If the difference is zero, the threads match and the access is valid.
-  return analyzer.CanProve(diff == 0);
+  return analyzer->CanProve(diff == 0);
 }
 
 } // namespace tl

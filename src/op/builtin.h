@@ -6,9 +6,7 @@
 #ifndef TVM_TL_OP_BUILTIN_H_
 #define TVM_TL_OP_BUILTIN_H_
 
-#include "operator.h"
-
-#include <tvm/ir/cast.h>
+#include <tvm/ir/op.h>
 #include <tvm/runtime/logging.h>
 
 namespace tvm {
@@ -44,8 +42,8 @@ static constexpr const char *kLaunchThreads = "tl.launch_threads";
 inline ffi::Optional<PrimExpr> GetAnnotatedMbarPhaseExpr(
     const ffi::Map<ffi::String, ffi::ObjectRef> &annotations) {
   if (auto val = annotations.Get(attr::kPipelineMbarPhaseExpr)) {
-    if (val.value()->IsInstance<PrimExprNode>()) {
-      return Downcast<PrimExpr>(val.value());
+    if (auto expr = val.value().as<PrimExpr>()) {
+      return *expr;
     }
     LOG(FATAL) << "Annotation `" << attr::kPipelineMbarPhaseExpr
                << "` expects a PrimExpr value, but got "

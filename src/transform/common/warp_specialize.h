@@ -97,7 +97,7 @@ public:
   /*! \brief Pipeline name; referenced by WSSync instructions. */
   ffi::String name;
   /*! \brief The buffers this pipeline protects (and multi-versions). */
-  ffi::Array<tirx::Buffer> buffers;
+  ffi::Array<tirx::BufferVar> buffers;
   /*! \brief Number of buffer versions. */
   int64_t depth;
 
@@ -110,7 +110,7 @@ public:
 
 class WSPipeline : public ffi::ObjectRef {
 public:
-  TVM_DLL WSPipeline(ffi::String name, ffi::Array<tirx::Buffer> buffers,
+  TVM_DLL WSPipeline(ffi::String name, ffi::Array<tirx::BufferVar> buffers,
                      int64_t depth);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(WSPipeline, ffi::ObjectRef,
                                              WSPipelineNode);

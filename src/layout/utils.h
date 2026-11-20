@@ -73,13 +73,13 @@ PrimExpr MakeFlattenedExpression(const Array<arith::IterSplitExpr> &splits);
  * \brief Convert an Array of IterVar to a Map object
  *
  */
-Map<Var, Range> ToVMap(const Array<IterVar> &ivs);
+Map<PrimVar, Range> ToVMap(const Array<IterVar> &ivs);
 
 /*!
  * \brief Convert a Map object to an Array of IterVar
  *
  */
-Array<IterVar> ToIterVars(const Map<Var, Range> &vmap);
+Array<IterVar> ToIterVars(const Map<PrimVar, Range> &vmap);
 
 /*!
  * \brief Compute the fragment layout of a reduction with its axis removed.
