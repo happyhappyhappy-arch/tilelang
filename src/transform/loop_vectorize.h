@@ -45,7 +45,7 @@ int MaxVectorLoadBits(const Target &target, bool global_only_access);
 
 // Extract an existing BufferLoad, optionally wrapped in address_of/access_ptr.
 // tvm_access_ptr carries a flat offset instead and must be handled separately.
-ffi::Optional<TensorLoad> ExtractBufferLoadForAtomic(const PrimExpr &expr);
+ffi::Optional<TensorLoad> ExtractBufferLoadForAtomic(const Expr &expr);
 
 // Target/dtype/address-space capability; access legality is checked separately.
 int GetMaxAtomicVectorSize(PrimType dtype, const ffi::String &storage_scope,
@@ -70,12 +70,12 @@ For VectorizeLoop(const For &loop, const arith::Analyzer *analyzer,
 
 // Can prove expr is independent with var, i.e. the value of expr doesn't change
 // when var changes
-bool CanProveIndependent(const PrimExpr &expr, Var var,
+bool CanProveIndependent(const PrimExpr &expr, PrimVar var,
                          arith::Analyzer *analyzer);
 
 // Check if expr is invariant within groups of consecutive unit-step iterations.
 // The minimum defaults to zero.
-bool IsExprInvariantInVectorBoundary(const PrimExpr &expr, const Var &var,
+bool IsExprInvariantInVectorBoundary(const PrimExpr &expr, const PrimVar &var,
                                      const PrimExpr &extent,
                                      int target_vectorized_size,
                                      arith::Analyzer *analyzer,
@@ -101,7 +101,7 @@ bool IsExprInvariantInVectorBoundary(const PrimExpr &expr, const Var &var,
  * The flag applies only to the analyzed address; an atomic's source value may
  * still broadcast. If the check fails, the planner can try a smaller width.
  */
-bool IndicesCanVectorize(const PrimExpr &expr, const Var &var,
+bool IndicesCanVectorize(const PrimExpr &expr, const PrimVar &var,
                          const PrimExpr &extent, int target_vectorized_size,
                          arith::Analyzer *analyzer, bool allow_broadcast = true,
                          const PrimExpr &min = 0);

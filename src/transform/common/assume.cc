@@ -5,8 +5,8 @@
  */
 
 #include "assume.h"
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/builtin.h>
-#include <tvm/tirx/expr.h>
 
 namespace tvm {
 namespace tl {
@@ -22,7 +22,7 @@ std::optional<PrimExpr> GetAssumeExprInEvaluateForm(Stmt stmt) {
     return std::nullopt;
   if (!call->op.same_as(builtin::assume()))
     return std::nullopt;
-  return call->args[0];
+  return call->args[0].as_or_throw<PrimExpr>();
 }
 
 bool IsAssumeInEvaluateForm(const Stmt &stmt) {

@@ -6,17 +6,18 @@
 #ifndef TVM_TL_BACKEND_COMMON_OP_REDUCE_H_
 #define TVM_TL_BACKEND_COMMON_OP_REDUCE_H_
 
+#include "backend/common/op/reduce_layout.h"
 #include "backend/common/target_utils.h"
 #include "op/reduce.h"
+#include "support/cast.h"
 #include "support/check.h"
-#include <tvm/ir/cast.h>
 #include <tvm/runtime/logging.h>
 
 #include "cuda/op/builtin.h"
 #include "layout/layout.h"
 #include "layout/utils.h"
 #include "op/utils.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 #include "transform/loop_partition.h"
 
 #include <tvm/arith/analyzer.h>
@@ -44,15 +45,6 @@ using namespace tirx;
 using namespace ffi;
 
 namespace reduce {
-
-inline Array<PrimExpr> InputPlaceholders(size_t n) {
-  Array<PrimExpr> result;
-  result.reserve(n);
-  for (size_t i = 0; i < n; ++i) {
-    result.push_back(InputPlaceholder(i));
-  }
-  return result;
-}
 
 /*!
  * \brief Resolve the participating thread range of a scalar AllReduce.
@@ -370,21 +362,6 @@ inline bool CanUsePackedRamp(const PrimExpr &index, const Var &var, int vsize,
   return true;
 }
 
-struct ThreadReduceStep {
-  int extent;
-  int scale;
-  // Position of this split inside the reduce var: the split covers
-  // floormod(floordiv(rv, lower_factor), extent).
-  int64_t lower_factor;
-
-  int ReducingThreads() const {
-    ICHECK_LE(extent, std::numeric_limits<int>::max() / scale)
-        << "Reduce thread count overflow: extent=" << extent
-        << ", scale=" << scale;
-    return extent * scale;
-  }
-};
-
 // A reduce is lowered in two phases: each thread first reduces the values it
 // owns locally, then the thread-level reducer combines the splits encoded in
 // the source fragment's thread expression.  This plan is the shared ownership
@@ -394,31 +371,6 @@ struct ReduceOwnershipPlan {
   Array<IterVar> local_reduce_vars;
   std::vector<ThreadReduceStep> thread_steps;
 };
-
-inline std::vector<ThreadReduceStep>
-CollectThreadReduceSteps(const arith::IterSumExpr &thread_iter_sum,
-                         const Var &reduce_var) {
-  std::vector<ThreadReduceStep> steps;
-  for (const auto &iter_split : thread_iter_sum->args) {
-    auto mark = iter_split->source->source.as<Var>();
-    if (!mark || !mark.value().same_as(reduce_var)) {
-      continue;
-    }
-
-    auto scale = as_const_int(iter_split->scale);
-    auto extent = as_const_int(iter_split->extent);
-    auto lower_factor = as_const_int(iter_split->lower_factor);
-    ICHECK(scale != nullptr && extent != nullptr && lower_factor != nullptr);
-    if (*extent == 1) {
-      continue;
-    }
-    ICHECK_LE(*scale, std::numeric_limits<int>::max());
-    ICHECK_LE(*extent, std::numeric_limits<int>::max());
-    steps.push_back(ThreadReduceStep{static_cast<int>(*extent),
-                                     static_cast<int>(*scale), *lower_factor});
-  }
-  return steps;
-}
 
 inline int64_t
 ThreadOwnedReduceFactor(const std::vector<ThreadReduceStep> &steps) {

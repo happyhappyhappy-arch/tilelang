@@ -23,8 +23,8 @@
  */
 
 #include "loop_partition.h"
+#include "support/cast.h"
 #include "support/check.h"
-#include <tvm/ir/cast.h>
 
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/stmt_functor.h>
@@ -48,20 +48,24 @@ public:
 private:
   Stmt VisitStmt_(const BindNode *node) final {
     auto bind = Downcast<Bind>(StmtExprMutator::VisitStmt_(node));
-    if (SideEffect(bind->value) <= CallEffectKind::kPure) {
+    if (bind->var.as<PrimVar>() && bind->value.as<PrimExpr>() &&
+        SideEffect(bind->value.as_or_throw<PrimExpr>()) <=
+            CallEffectKind::kPure) {
       // Refresh let aliases from the substituted IR before simplifying uses.
       // The analyzer may still bind them to the original loop indices.
-      analyzer_->Bind(bind->var, bind->value, /*allow_override=*/true);
+      (*analyzer_)
+          ->Bind(bind->var.as_or_throw<PrimVar>(),
+                 bind->value.as_or_throw<PrimExpr>(), /*allow_override=*/true);
     }
     return bind;
   }
 
-  PrimExpr VisitExpr_(const BufferLoadNode *node) final {
+  Expr VisitExpr_(const TensorLoadNode *node) final {
     auto visited = StmtExprMutator::VisitExpr_(node);
-    auto n = Downcast<BufferLoad>(visited);
+    auto n = Downcast<TensorLoad>(visited);
     auto nptr = n.CopyOnWrite();
     nptr->indices = nptr->indices.Map(
-        [&](const auto &e) { return analyzer_->Simplify(e); });
+        [&](const auto &e) { return (*analyzer_)->Simplify(e); });
     return n;
   }
   Stmt VisitStmt_(const BufferStoreNode *node) final {
@@ -69,7 +73,7 @@ private:
     auto n = Downcast<BufferStore>(visited);
     auto nptr = n.CopyOnWrite();
     nptr->indices = nptr->indices.Map(
-        [&](const auto &e) { return analyzer_->Simplify(e); });
+        [&](const auto &e) { return (*analyzer_)->Simplify(e); });
     return n;
   }
   arith::Analyzer *analyzer_;
@@ -119,11 +123,11 @@ For PartitionLoop(For op, PrimExpr thread_index, arith::Analyzer *analyzer,
   int old_loop_depth = loop_layout->InputDim();
   int new_loop_depth = loop_layout->OutputDim();
   // Create the new loop iter var
-  Array<Var> vars;
+  Array<PrimVar> vars;
   for (int i = 0; i < new_loop_depth; i++) {
-    Var var = Var(std::string{char('i' + i)});
-    analyzer->Bind(var, Range::FromMinExtent(make_zero(var->dtype),
-                                             loop_layout->OutputShape()[i]));
+    PrimVar var(std::string{char('i' + i)}, loop_layout->OutputShape()[i].ty());
+    (*analyzer)->Bind(var, Range::FromMinExtent(MakeConst(var.ty(), 0),
+                                                loop_layout->OutputShape()[i]));
     vars.push_back(var);
   }
   // Normalize the thread index against the layout thread range once, then
@@ -156,7 +160,8 @@ For PartitionLoop(For op, PrimExpr thread_index, arith::Analyzer *analyzer,
     body = loop->body;
   }
   // substitute and re-construct the serial loop
-  body = Substitute(body, vmap);
+  body = SubstituteWithDataTypeLegalization(
+      body, [&](const Var &v) { return vmap.Get(v); });
   // Guard executes the recovered loop body only if each inverse-mapped iterator
   // falls back into the original For ranges. We first check every axis from the
   // old loop nest (old_loop_depth) and then the extra index produced by inverse
@@ -172,23 +177,23 @@ For PartitionLoop(For op, PrimExpr thread_index, arith::Analyzer *analyzer,
   // differs from layout input shape (e.g., loop extent=4 with
   // Fragment([8]->[1]) produces inverse index `tx % 8` ranging 0-7, requiring
   // guard `tx % 8 < 4`).
-  PrimExpr guard = const_true();
+  PrimExpr guard = IntImm::Bool(true);
   for (int i = 0; i < old_loop_depth; i++) {
     PrimExpr index = indices[i];
-    PrimExpr lower_bound = analyzer->Simplify(index >= loop_mins[i]);
+    PrimExpr lower_bound = (*analyzer)->Simplify(index >= loop_mins[i]);
     PrimExpr upper_bound =
-        analyzer->Simplify(index < loop_mins[i] + loop_extents[i]);
-    guard = And(guard, And(lower_bound, upper_bound));
+        (*analyzer)->Simplify(index < loop_mins[i] + loop_extents[i]);
+    guard = prim::And(guard, prim::And(lower_bound, upper_bound));
   }
   auto inv_output_shape = inv_loop->OutputShape();
   if (inv_output_shape.size() > static_cast<size_t>(old_loop_depth)) {
     PrimExpr replicate_index = indices[old_loop_depth];
     PrimExpr replicate_extent = inv_output_shape[old_loop_depth];
-    PrimExpr lower_bound = analyzer->Simplify(
-        replicate_index >= make_zero(replicate_index.dtype()));
+    PrimExpr lower_bound = (*analyzer)->Simplify(
+        replicate_index >= MakeConst(replicate_index.ty(), 0));
     PrimExpr upper_bound =
-        analyzer->Simplify(replicate_index < replicate_extent);
-    guard = And(guard, And(lower_bound, upper_bound));
+        (*analyzer)->Simplify(replicate_index < replicate_extent);
+    guard = prim::And(guard, prim::And(lower_bound, upper_bound));
   }
   {
     // Lower generic execution-multiplicity markers against this loop's
@@ -197,23 +202,23 @@ For PartitionLoop(For op, PrimExpr thread_index, arith::Analyzer *analyzer,
     // logical iteration and the markers are simply stripped.
     Optional<PrimExpr> replica_guard;
     if (indices.size() > static_cast<size_t>(old_loop_depth)) {
-      PrimExpr is_replica_zero = analyzer->Simplify(EQ(
-          indices[old_loop_depth], make_zero(indices[old_loop_depth].dtype())));
-      if (!analyzer->CanProve(is_replica_zero)) {
+      PrimExpr is_replica_zero = (*analyzer)->Simplify(prim::EQ(
+          indices[old_loop_depth], MakeConst(indices[old_loop_depth].ty(), 0)));
+      if (!(*analyzer)->CanProve(is_replica_zero)) {
         replica_guard = is_replica_zero;
       }
     }
     body = MultiplicityMarkerLowerer::Rewrite(std::move(body), replica_guard);
   }
-  PrimExpr simplified_guard = analyzer->Simplify(guard);
-  if (!analyzer->CanProve(simplified_guard)) {
+  PrimExpr simplified_guard = (*analyzer)->Simplify(guard);
+  if (!(*analyzer)->CanProve(simplified_guard)) {
     body = IfThenElse(simplified_guard, body, Stmt(), op_span);
   }
 
   for (int i = new_loop_depth - 1; i >= 0; i--) {
-    body = For(vars[i], make_zero(vars[i]->dtype), inv_loop->InputShape()[i],
+    body = For(vars[i], MakeConst(vars[i].ty(), 0), inv_loop->InputShape()[i],
                ForKind::kSerial, body, std::nullopt, {}, std::nullopt, op_span);
-    analyzer->Bind(vars[i], Range(0, inv_loop->InputShape()[i]));
+    (*analyzer)->Bind(vars[i], Range(0, inv_loop->InputShape()[i]));
   }
 
   body = BufferIndiceSimplify(analyzer)(body);
@@ -228,8 +233,8 @@ public:
 private:
   Stmt VisitStmt_(const ForNode *node) final {
     if (node->kind == ForKind::kSerial) {
-      auto analyzer = std::make_shared<arith::Analyzer>();
-      if (as_const_int(analyzer->Simplify(node->extent)) == nullptr) {
+      arith::Analyzer fresh_analyzer;
+      if (as_const_int(fresh_analyzer->Simplify(node->extent)) == nullptr) {
         return StmtExprMutator::VisitStmt_(node);
       }
       For new_for = GetRef<For>(node);
@@ -247,21 +252,22 @@ public:
 
   Fragment Partition(const For &op, int num_thread, int vectorize_size) {
     this->VisitStmt(op);
-    DataType dtype = DataType::Int(32);
+    PrimType dtype = PrimType::Int(32);
     if (!loop_vars_.empty()) {
-      dtype = loop_vars_.back()->var.dtype();
+      dtype = loop_vars_.back()->var.ty();
     }
-    PrimExpr flattened = make_const(dtype, 0);
-    PrimExpr vector_extent = make_const(dtype, vectorize_size);
-    PrimExpr thread_extent_const = make_const(dtype, num_thread);
+    PrimExpr flattened = MakeConst(dtype, 0);
+    PrimExpr vector_extent = MakeConst(dtype, vectorize_size);
+    PrimExpr thread_extent_const = MakeConst(dtype, num_thread);
     for (size_t i = 0; i < loop_vars_.size(); i++) {
       PrimExpr extent = loop_vars_[i]->dom->extent;
       flattened = flattened * extent + loop_vars_[i]->var;
     }
-    PrimExpr access_idx = FloorDiv(flattened, vector_extent);
-    PrimExpr thd = FloorMod(access_idx, thread_extent_const);
-    PrimExpr idx = FloorDiv(access_idx, thread_extent_const) * vector_extent +
-                   FloorMod(flattened, vector_extent);
+    PrimExpr access_idx = prim::FloorDiv(flattened, vector_extent);
+    PrimExpr thd = prim::FloorMod(access_idx, thread_extent_const);
+    PrimExpr idx =
+        prim::FloorDiv(access_idx, thread_extent_const) * vector_extent +
+        prim::FloorMod(flattened, vector_extent);
 
     auto fragment = Fragment(loop_vars_, {idx}, {thd}, {});
     if (has_fragment_) {
@@ -274,8 +280,9 @@ public:
   }
 
 private:
-  void VisitExpr_(const BufferLoadNode *op) final {
-    if (IsFragmentBuffer(op->buffer)) {
+  void VisitExpr_(const TensorLoadNode *op) final {
+    if (auto buffer = op->source.as<BufferVar>();
+        buffer && IsFragmentBuffer(*buffer)) {
       has_fragment_ = true;
     }
     StmtExprVisitor::VisitExpr_(op);
@@ -345,10 +352,9 @@ Stmt LowerParallelLoop(For loop, const Fragment &loop_layout,
   if (parallel_loop) {
     // Do not carry partitioning's local bindings into vectorization or back to
     // the caller. Both stages start from the same enclosing analysis context.
-    auto partition_analyzer = analyzer->Clone();
-    result_loop =
-        PartitionLoop(result_loop, thread_index, partition_analyzer.get(),
-                      loop_layout, require_padding_guard);
+    auto partition_analyzer = (*analyzer)->Clone();
+    result_loop = PartitionLoop(result_loop, thread_index, &partition_analyzer,
+                                loop_layout, require_padding_guard);
   }
 
   // Step 2: Vectorize the loop; the planner picks the size per loop

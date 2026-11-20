@@ -6,6 +6,7 @@
  */
 
 #include "reducer.h"
+#include "support/cast.h"
 
 #include <cmath>
 #include <limits>
@@ -18,9 +19,10 @@
 #include <tvm/tirx/op_attr_types.h>
 #include <tvm/tirx/stmt_functor.h>
 
-#include "backend/common/op/reduce.h"
+#include "backend/common/op/reduce_layout.h"
 #include "builtin_registry.h"
 #include "reduce.h"
+#include "support/post_order_visit.h"
 #include "utils.h"
 
 namespace tvm {
@@ -34,8 +36,8 @@ bool ValueIsReplicaSafe(const PrimExpr &value) {
   }
   bool safe = true;
   PostOrderVisit(value, [&](const ObjectRef &obj) {
-    if (const auto *load = obj.as<BufferLoadNode>()) {
-      const Buffer &buffer = load->buffer;
+    if (const auto *load = obj.as<TensorLoadNode>()) {
+      const BufferVar &buffer = load->source.as_or_throw<BufferVar>();
       if (!IsFragmentBuffer(buffer) && !IsSharedBuffer(buffer) &&
           !IsGlobalBuffer(buffer)) {
         safe = false;
@@ -60,9 +62,9 @@ static Fragment ProjectReducerDimNoCondense(const Fragment &src_layout,
   PrimExpr reducer_rep_extent = indice_rep_extent * src_rep_extent;
   auto fwd = backend::reduce::InputPlaceholders(src_layout->InputDim() - 1);
   fwd.insert(fwd.begin() + dim,
-             FloorMod(ReplicationPlaceholder(), indice_rep_extent));
+             prim::FloorMod(ReplicationPlaceholder(), indice_rep_extent));
   auto thd = src_layout->ForwardThread(
-      fwd, FloorDiv(ReplicationPlaceholder(), indice_rep_extent));
+      fwd, prim::FloorDiv(ReplicationPlaceholder(), indice_rep_extent));
   auto reducer_shape = src_layout->InputShape();
   reducer_shape.erase(reducer_shape.begin() + dim);
   if (reducer_shape.empty()) {
@@ -159,7 +161,7 @@ AnalyzeReducerUpdateSite(const ReducerUpdateSiteHint &site,
   // boundary-preserving condensation compacts both halves without mixing
   // them, keeping `_rep % combine` = addend lanes true on the result.
   Fragment induced = site.loop_layout;
-  PrimExpr combine_raw = make_const(DataType::Int(32), 1);
+  PrimExpr combine_raw = MakeConst(PrimType::Int(32), 1);
   for (int dim = static_cast<int>(ndim) - 1; dim >= 0; --dim) {
     if (!is_output_dim[dim]) {
       combine_raw = combine_raw * induced->InputShape()[dim];
@@ -229,7 +231,8 @@ AnalyzeReducerUpdateSite(const ReducerUpdateSiteHint &site,
     return reject("induced layout rank mismatch");
   }
   for (size_t d = 0; d < reducer_shape.size(); ++d) {
-    if (!analyzer->CanProveEqual(induced->InputShape()[d], reducer_shape[d])) {
+    if (!(*analyzer)->CanProveEqual(induced->InputShape()[d],
+                                    reducer_shape[d])) {
       return reject("induced layout shape mismatch");
     }
   }
@@ -240,17 +243,17 @@ AnalyzeReducerUpdateSite(const ReducerUpdateSiteHint &site,
   // reduction vars are reduced. Splits from loop replication become value
   // replication; reduction vars absent from the thread expression
   // accumulate serially on one thread and need no communication.
-  Map<Var, Range> var_ranges;
+  Map<PrimVar, Range> var_ranges;
   for (size_t i = 0; i < ndim; ++i) {
     var_ranges.Set(InputPlaceholder(i),
-                   Range::FromMinExtent(make_zero(DataType::Int(32)),
+                   Range::FromMinExtent(IntImm::Int32(0),
                                         site.loop_layout->InputShape()[i]));
   }
   var_ranges.Set(ReplicationPlaceholder(),
-                 Range::FromMinExtent(make_zero(DataType::Int(32)),
+                 Range::FromMinExtent(IntImm::Int32(0),
                                       site.loop_layout->ReplicateExtent()));
   analysis.iter_sum = arith::NormalizeToIterSum(
-      site.loop_layout->GetForwardThread(), var_ranges, analyzer);
+      site.loop_layout->GetForwardThread(), var_ranges, *analyzer);
   std::vector<backend::reduce::ThreadReduceStep> steps;
   for (size_t i = 0; i < ndim; ++i) {
     if (is_output_dim[i]) {
@@ -299,9 +302,9 @@ ReducerV2OpType ParseReducerV2OpType(const ffi::String &op_str) {
   return ReducerV2OpType::kSum; // unreachable
 }
 
-PrimExpr ReducerV2Identity(ReducerV2OpType op, DataType dtype) {
-  bool is_int = dtype.is_int();
-  bool is_uint = dtype.is_uint();
+PrimExpr ReducerV2Identity(ReducerV2OpType op, PrimType dtype) {
+  bool is_int = dtype.MatchesCode(kDLInt);
+  bool is_uint = dtype.MatchesCode(kDLUInt);
   int bits = dtype.bits();
   auto signed_min = [&]() -> int64_t {
     return bits >= 64 ? std::numeric_limits<int64_t>::min()
@@ -322,29 +325,29 @@ PrimExpr ReducerV2Identity(ReducerV2OpType op, DataType dtype) {
   };
   switch (op) {
   case ReducerV2OpType::kSum:
-    return make_zero(dtype);
+    return MakeConst(dtype, 0);
   case ReducerV2OpType::kMax:
     if (is_int)
-      return make_const(dtype, signed_min());
+      return MakeConst(dtype, signed_min());
     if (is_uint)
-      return make_const(dtype, 0);
-    return make_const(dtype, -INFINITY);
+      return MakeConst(dtype, 0);
+    return MakeConst(dtype, -INFINITY);
   case ReducerV2OpType::kMin:
     if (is_int)
-      return make_const(dtype, signed_max());
+      return MakeConst(dtype, signed_max());
     if (is_uint)
-      return make_const(dtype, unsigned_max());
-    return make_const(dtype, INFINITY);
+      return MakeConst(dtype, unsigned_max());
+    return MakeConst(dtype, INFINITY);
   case ReducerV2OpType::kBitAnd:
     // All-ones: x & identity == x for every bit pattern.
     check_bitwise_dtype();
     if (is_uint)
-      return make_const(dtype, unsigned_max());
-    return make_const(dtype, -1);
+      return MakeConst(dtype, unsigned_max());
+    return MakeConst(dtype, -1);
   case ReducerV2OpType::kBitOr:
   case ReducerV2OpType::kBitXor:
     check_bitwise_dtype();
-    return make_zero(dtype);
+    return MakeConst(dtype, 0);
   }
   LOG(FATAL) << "unreachable";
   return PrimExpr();
@@ -356,9 +359,9 @@ PrimExpr ReducerV2Combine(ReducerV2OpType op, const PrimExpr &lhs,
   case ReducerV2OpType::kSum:
     return lhs + rhs;
   case ReducerV2OpType::kMax:
-    return Max(lhs, rhs);
+    return prim::Max(lhs, rhs);
   case ReducerV2OpType::kMin:
-    return Min(lhs, rhs);
+    return prim::Min(lhs, rhs);
   case ReducerV2OpType::kBitAnd:
     return lhs & rhs;
   case ReducerV2OpType::kBitOr:
@@ -374,8 +377,8 @@ PrimExpr ReducerV2Combine(ReducerV2OpType op, const PrimExpr &lhs,
 // ReducerInitOp
 // ---------------------------------------------------------------------------
 
-ReducerInitOp::ReducerInitOp(ffi::Array<PrimExpr> args,
-                             ffi::Map<ffi::String, ffi::ObjectRef>) {
+ReducerInitOp::ReducerInitOp(ffi::Array<Expr> args,
+                             ffi::Map<ffi::String, ffi::Any>) {
   ICHECK(args.size() == 1 || args.size() == 2)
       << "reducer_init expects (region) or (region, init value)";
   auto node = tvm::ffi::make_object<ReducerInitOpNode>();
@@ -385,10 +388,11 @@ ReducerInitOp::ReducerInitOp(ffi::Array<PrimExpr> args,
   node->reducer = access.region->buffer;
   CheckReductionDType(node->reducer->dtype, "reducer_init");
   if (args.size() == 2) {
-    ICHECK(args[1].dtype() == node->reducer->dtype)
-        << "reducer_init init value dtype " << args[1].dtype()
+    ICHECK(args[1].as_or_throw<PrimExpr>().ty() == node->reducer->dtype)
+        << "reducer_init init value dtype "
+        << args[1].as_or_throw<PrimExpr>().ty()
         << " does not match reducer dtype " << node->reducer->dtype;
-    node->seed = args[1];
+    node->seed = args[1].as_or_throw<PrimExpr>();
   }
   node->SetAccessRegions({access});
   data_ = std::move(node);
@@ -416,26 +420,26 @@ TIR_REGISTER_TL_TILE_OP(ReducerInitOp, reducer_init)
     // reducer region plus an optional init value.
     .set_num_inputs(-1)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 // ---------------------------------------------------------------------------
 // tl.reducer_update: per-iteration builtin intrinsic (see reducer.h)
 // ---------------------------------------------------------------------------
 
-ReducerUpdateArgs ParseReducerUpdate(const tirx::CallNode *call) {
+ReducerUpdateArgs ParseReducerUpdate(const CallNode *call) {
   ICHECK(call->op.same_as(reducer_update()));
   ICHECK_EQ(call->args.size(), 2)
       << "reducer_update expects (acc[indices], contribution value)";
-  const auto *load = call->args[0].as<BufferLoadNode>();
+  const auto *load = call->args[0].as<TensorLoadNode>();
   ICHECK(load) << "reducer_update target must be written as `acc[indices]` "
                   "in the first argument position, got "
                << call->args[0];
   ReducerUpdateArgs result;
-  result.reducer = load->buffer;
+  result.reducer = load->source.as_or_throw<BufferVar>();
   result.indices = load->indices;
-  result.value = call->args[1];
-  ICHECK(result.value.dtype() == result.reducer->dtype)
-      << "reducer_update contribution dtype " << result.value.dtype()
+  result.value = call->args[1].as_or_throw<PrimExpr>();
+  ICHECK(result.value.ty() == result.reducer->dtype)
+      << "reducer_update contribution dtype " << result.value.ty()
       << " does not match reducer dtype " << result.reducer->dtype;
   return result;
 }
@@ -443,14 +447,14 @@ ReducerUpdateArgs ParseReducerUpdate(const tirx::CallNode *call) {
 TIR_DEFINE_TL_BUILTIN(reducer_update)
     .set_num_inputs(2)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 // ---------------------------------------------------------------------------
 // FinalizeReducerV2Op
 // ---------------------------------------------------------------------------
 
-FinalizeReducerV2Op::FinalizeReducerV2Op(
-    ffi::Array<PrimExpr> args, ffi::Map<ffi::String, ffi::ObjectRef>) {
+FinalizeReducerV2Op::FinalizeReducerV2Op(ffi::Array<Expr> args,
+                                         ffi::Map<ffi::String, ffi::Any>) {
   ICHECK_EQ(args.size(), 2)
       << "finalize_reducer (v2) expects (reducer region, dst region)";
   auto node = tvm::ffi::make_object<FinalizeReducerV2OpNode>();
@@ -528,14 +532,14 @@ LayoutMap FinalizeReducerV2OpNode::InferLayout(const LayoutInferArgs &args,
 }
 
 Fragment
-FinalizeReducerV2OpNode::FallbackDstLayout(const Buffer &dst,
+FinalizeReducerV2OpNode::FallbackDstLayout(const BufferVar &dst,
                                            const Range &thread_bounds) {
   return Fragment::FullyReplicated(dst->shape, thread_bounds->extent)
       ->BindThreadRange(thread_bounds);
 }
 
-bool FinalizeReducerV2OpNode::CanSteerDst(const Buffer &reducer,
-                                          const Buffer &dst,
+bool FinalizeReducerV2OpNode::CanSteerDst(const BufferVar &reducer,
+                                          const BufferVar &dst,
                                           const Range &thread_bounds,
                                           arith::Analyzer *analyzer) {
   if (!IsFragmentBuffer(dst)) {
@@ -548,7 +552,7 @@ bool FinalizeReducerV2OpNode::CanSteerDst(const Buffer &reducer,
     return false;
   }
   for (size_t d = 0; d < reducer->shape.size(); ++d) {
-    if (!analyzer->CanProveEqual(reducer->shape[d], dst->shape[d])) {
+    if (!(*analyzer)->CanProveEqual(reducer->shape[d], dst->shape[d])) {
       return false;
     }
   }
@@ -565,7 +569,7 @@ TileOperator FinalizeReducerV2OpNode::Clone() const {
 TIR_REGISTER_TL_TILE_OP(FinalizeReducerV2Op, finalize_reducer_v2)
     .set_num_inputs(2)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 // ---------------------------------------------------------------------------
 // FinalizeReducerOp: the materialized collective
@@ -608,8 +612,7 @@ void RegisterFinalizeReducerImpl(FinalizeReducerImpl impl) {
 }
 
 FinalizeReducerOp::FinalizeReducerOp(
-    ffi::Array<PrimExpr> args,
-    ffi::Map<ffi::String, ffi::ObjectRef> annotations) {
+    ffi::Array<Expr> args, ffi::Map<ffi::String, ffi::Any> annotations) {
   auto node = tvm::ffi::make_object<FinalizeReducerOpNode>();
   auto reducer_access = NormalizeToAccessRegion(args[0], kAccessReadWrite);
   reducer_access.region =
@@ -618,19 +621,19 @@ FinalizeReducerOp::FinalizeReducerOp(
   node->reducer = reducer_access.region->buffer;
   node->SetAccessRegions({reducer_access});
   CheckReductionDType(node->reducer->dtype, "finalize_reducer");
-  node->op = (ReducerV2OpType)*as_const_int(args[1]);
+  node->op = (ReducerV2OpType)args[1].as_or_throw<IntImm>()->value;
   // Optional explicit collective plan (reducer v2 narrow plans): flattened
   // (reducing_threads, scale) pairs starting at args[2].
   ICHECK(args.size() % 2 == 0) << "finalize_reducer: plan steps must come in "
                                   "(reducing_threads, scale) pairs";
   for (size_t i = 2; i + 1 < args.size(); i += 2) {
-    int reducing_threads = (int)*as_const_int(args[i]);
-    int scale = (int)*as_const_int(args[i + 1]);
+    int reducing_threads = (int)args[i].as_or_throw<IntImm>()->value;
+    int scale = (int)args[i + 1].as_or_throw<IntImm>()->value;
     ICHECK_GT(reducing_threads, 0)
         << "finalize_reducer: explicit reducing_threads must be positive";
     ICHECK_GT(scale, 0) << "finalize_reducer: explicit scale must be positive";
-    node->plan_steps.push_back(Integer(reducing_threads));
-    node->plan_steps.push_back(Integer(scale));
+    node->plan_steps.push_back(IntImm::Int32(reducing_threads));
+    node->plan_steps.push_back(IntImm::Int32(scale));
   }
   // Read explicit batch size from annotations (0 means auto-detect).
   if (annotations.count("batch")) {
@@ -672,7 +675,7 @@ TIR_REGISTER_TL_TILE_OP(FinalizeReducerOp, finalize_reducer)
     // enum and the flattened (reducing_threads, scale) plan pairs.
     .set_num_inputs(-1)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   ReducerInitOpNode::RegisterReflection();

@@ -61,9 +61,9 @@ public:
 
 private:
   bool valid_{false};
-  tirx::Var thread_var_;
-  Map<tirx::Var, PrimExpr> loop_var_map_;
-  Map<tirx::Var, PrimExpr> thread_offset_map_;
+  tirx::PrimVar thread_var_;
+  Map<tirx::PrimVar, PrimExpr> loop_var_map_;
+  Map<tirx::PrimVar, PrimExpr> thread_offset_map_;
   bool has_thread_offset_{false};
   arith::Analyzer *analyzer_;
 };

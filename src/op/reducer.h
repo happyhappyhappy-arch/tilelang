@@ -58,14 +58,14 @@ enum class ReducerV2OpType : int {
 ReducerV2OpType ParseReducerV2OpType(const ffi::String &op_str);
 
 /*! \brief Identity element of a combine op for the given dtype. */
-PrimExpr ReducerV2Identity(ReducerV2OpType op, DataType dtype);
+PrimExpr ReducerV2Identity(ReducerV2OpType op, PrimType dtype);
 
 /*! \brief combine(lhs, rhs) expression for a combine op. */
 PrimExpr ReducerV2Combine(ReducerV2OpType op, const PrimExpr &lhs,
                           const PrimExpr &rhs);
 
 /*! \brief True if `buffer` lives in the virtual `local.reducer` scope. */
-inline bool IsReducerV2Buffer(const Buffer &buffer) {
+inline bool IsReducerV2Buffer(const BufferVar &buffer) {
   return buffer.defined() && buffer.scope() == "local.reducer";
 }
 
@@ -124,7 +124,7 @@ AnalyzeReducerUpdateSite(const ReducerUpdateSiteHint &site,
 /// args[0] = tl.region(acc, "w"), optional args[1] = init value.
 class ReducerInitOpNode : public TileOperatorNode {
 public:
-  Buffer reducer;
+  BufferVar reducer;
   ffi::Optional<PrimExpr> seed; ///< logical starting value (args[1])
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tl.ReducerInitOp", ReducerInitOpNode,
                                     TileOperatorNode);
@@ -148,9 +148,9 @@ class ReducerInitOp : public TileOperator {
 public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ReducerInitOp, TileOperator,
                                              ReducerInitOpNode);
-  TVM_DLL ReducerInitOp(ffi::Array<PrimExpr> args,
-                        ffi::Map<ffi::String, ffi::ObjectRef> annotations =
-                            ffi::Map<ffi::String, ffi::ObjectRef>());
+  TVM_DLL ReducerInitOp(ffi::Array<Expr> args,
+                        ffi::Map<ffi::String, ffi::Any> annotations =
+                            ffi::Map<ffi::String, ffi::Any>());
   static const Op &Get();
 };
 
@@ -170,13 +170,13 @@ TVM_DLL const Op &reducer_update();
 
 /*! \brief Parsed form of a tl.reducer_update call. */
 struct ReducerUpdateArgs {
-  Buffer reducer;
+  BufferVar reducer;
   ffi::Array<PrimExpr> indices; ///< logical output indices
   PrimExpr value;               ///< contribution expression
 };
 
 /*! \brief Parse and validate a tl.reducer_update call. */
-ReducerUpdateArgs ParseReducerUpdate(const tirx::CallNode *call);
+ReducerUpdateArgs ParseReducerUpdate(const CallNode *call);
 
 /// T.finalize_reducer(acc, dst): complete the epoch's cross-participant
 /// communication and write the logical result into the independent
@@ -184,8 +184,8 @@ ReducerUpdateArgs ParseReducerUpdate(const tirx::CallNode *call);
 /// args[1] = tl.region(dst, "w").
 class FinalizeReducerV2OpNode : public TileOperatorNode {
 public:
-  Buffer reducer;
-  Buffer dst;
+  BufferVar reducer;
+  BufferVar dst;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tl.FinalizeReducerV2Op",
                                     FinalizeReducerV2OpNode, TileOperatorNode);
 
@@ -200,7 +200,7 @@ public:
    *  participant holds every element, so any already-frozen consumer loop can
    *  read it. Shared by the kFree steering proposal and the inference
    *  engine's last-resort fallback attempt so the two can never diverge. */
-  static Fragment FallbackDstLayout(const Buffer &dst,
+  static Fragment FallbackDstLayout(const BufferVar &dst,
                                     const Range &thread_bounds);
 
   /*! \brief Structural gates of the dst-steering proposal: `dst` is a
@@ -209,7 +209,7 @@ public:
    *  silence checks and the inference engine's reservation registration so
    *  the two can never drift ("reserved" must mean "has a capable
    *  proposer"). */
-  static bool CanSteerDst(const Buffer &reducer, const Buffer &dst,
+  static bool CanSteerDst(const BufferVar &reducer, const BufferVar &dst,
                           const Range &thread_bounds,
                           arith::Analyzer *analyzer);
 
@@ -226,9 +226,9 @@ public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(FinalizeReducerV2Op, TileOperator,
                                              FinalizeReducerV2OpNode);
   TVM_DLL
-  FinalizeReducerV2Op(ffi::Array<PrimExpr> args,
-                      ffi::Map<ffi::String, ffi::ObjectRef> annotations =
-                          ffi::Map<ffi::String, ffi::ObjectRef>());
+  FinalizeReducerV2Op(ffi::Array<Expr> args,
+                      ffi::Map<ffi::String, ffi::Any> annotations =
+                          ffi::Map<ffi::String, ffi::Any>());
   static const Op &Get();
 };
 
@@ -242,7 +242,7 @@ public:
 /// RegisterFinalizeReducerImpl (CUDA/ROCm share the plan contract).
 class FinalizeReducerOpNode : public TileOperatorNode {
 public:
-  tirx::Buffer reducer;
+  tirx::BufferVar reducer;
   ReducerV2OpType op;
   // Batch size for batched AllReduce (1 = scalar path, same as T.reduce
   // default).
@@ -254,7 +254,7 @@ public:
   // communication) from the legacy wide plan (width derived from the
   // storage layout's ReplicateExtent).
   bool explicit_plan{false};
-  ffi::Array<Integer> plan_steps;
+  ffi::Array<IntImm> plan_steps;
   // Optional logical seed, combined into every physical slot exactly once
   // after the collective (all replicas hold the final value by then, so a
   // uniform per-slot combine applies the seed once per logical output).
@@ -298,9 +298,9 @@ class FinalizeReducerOp : public TileOperator {
 public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(FinalizeReducerOp, TileOperator,
                                              FinalizeReducerOpNode);
-  TVM_DLL FinalizeReducerOp(ffi::Array<PrimExpr> args,
-                            ffi::Map<ffi::String, ffi::ObjectRef> annotations =
-                                ffi::Map<ffi::String, ffi::ObjectRef>());
+  TVM_DLL FinalizeReducerOp(ffi::Array<Expr> args,
+                            ffi::Map<ffi::String, ffi::Any> annotations =
+                                ffi::Map<ffi::String, ffi::Any>());
   static const Op &Get();
 };
 
