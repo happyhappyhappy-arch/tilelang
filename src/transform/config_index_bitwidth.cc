@@ -1,11 +1,7 @@
 #include "../../3rdparty/tvm/src/tirx/ir/data_type_rewriter.h"
 #include "../op/builtin.h"
-#include "arith/ir_mutator_with_analyzer.h"
 #include "common/int64_promoter.h"
-#include "support/check.h"
-#include "tir/transforms/ir_utils.h"
-#include <tvm/ir/cast.h>
-#include <tvm/tirx/builtin.h>
+#include "tirx/ir_mutator_with_analyzer.h"
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/transform.h>
 
@@ -15,135 +11,58 @@ namespace tl {
 using namespace tirx;
 using namespace ffi;
 using namespace arith;
-class ConfigIndexBitwidthRewriter : public IndexDataTypeRewriter {
+class ConfigIndexBitwidthRewriter : public IndexDataTypeNormalizer {
 public:
-  using Parent = IndexDataTypeRewriter;
-  ConfigIndexBitwidthRewriter(int index_bitwidth)
-      : _index_bitwidth_(index_bitwidth) {}
+  using IndexDataTypeNormalizer::IndexDataTypeNormalizer;
 
-  Stmt operator()(const Stmt &s) { return VisitStmt(s); }
-
-protected:
-  using Parent::VisitExpr_;
-  using Parent::VisitStmt_;
-
-  PrimExpr VisitExpr_(const VarNode *op) final {
-    if (op->dtype.is_int() && op->dtype.bits() < 64) {
-      DataType new_dtype = DataType::Int(64);
-      if (!var_remap_.count(op)) {
-        var_remap_[op] = Var(op->name_hint, new_dtype);
-      }
-    }
-    return Parent::VisitExpr_(op);
+private:
+  bool CanRewriteDType(PrimType type) const final {
+    return type.MatchesCode(kDLInt) && type.bits() < 64;
   }
-
-  PrimExpr VisitExpr_(const IntImmNode *op) final {
-    if (is_enabled_ && op->dtype.is_int() && op->dtype.bits() < 64) {
-      return IntImm(DataType::Int(_index_bitwidth_), op->value);
-    }
-    return GetRef<PrimExpr>(op);
-  }
-
-  PrimExpr VisitExpr_(const CastNode *op) final {
-    if (is_enabled_ && op->dtype.is_int() && op->dtype.bits() < 64) {
-      PrimExpr value = VisitExpr(op->value);
-      return Cast(DataType::Int(_index_bitwidth_), value);
-    }
-    return Parent::VisitExpr_(op);
-  }
-
-  Stmt VisitStmt_(const BufferStoreNode *op) final {
-    // Force indices to be int64
-    bool is_enabled = is_enabled_;
-    is_enabled_ = true;
-    auto node = Downcast<BufferStore>(Parent::VisitStmt_(op));
-    is_enabled_ = is_enabled;
-    return std::move(node);
-  }
-
-  PrimExpr VisitExpr_(const BufferLoadNode *op) final {
-    // Force indices to be int64
-    bool is_enabled = is_enabled_;
-    is_enabled_ = true;
-    auto node = Downcast<BufferLoad>(Parent::VisitExpr_(op));
-    is_enabled_ = is_enabled;
-    return std::move(node);
-  }
-
-  int _index_bitwidth_;
 };
 
 class IndexLegalizer : public IRMutatorWithAnalyzer {
-
 public:
-  static Stmt Rewrite(const Stmt &stmt) {
-    Analyzer ana;
-    auto pass = IndexLegalizer(&ana);
-    return pass.VisitStmt(stmt);
-  }
+  using IRMutatorWithAnalyzer::IRMutatorWithAnalyzer;
+  using IRMutatorWithAnalyzer::VisitStmt;
 
 private:
-  explicit IndexLegalizer(arith::Analyzer *ana) : IRMutatorWithAnalyzer(ana) {}
-
-  Stmt VisitStmt_(const BufferStoreNode *op) final {
-    auto buffer_store =
-        Downcast<BufferStore>(IRMutatorWithAnalyzer::VisitStmt_(op));
-    auto indices = buffer_store->indices;
-    Array<PrimExpr> new_indices;
-    for (auto index : indices) {
-      if (index->dtype.is_int() && index->dtype.bits() < 64) {
-        auto int_bound = analyzer_->const_int_bound(index);
-        if (int_bound->max_value >= (1LL << (index->dtype.bits() - 1)) - 1 ||
-            int_bound->min_value < -(1LL << (index->dtype.bits() - 1))) {
-          Int64Promoter promoter;
-          index = promoter(index);
-          new_indices.push_back(index);
-          continue;
-        }
-      }
-      new_indices.push_back(index);
-    }
-    buffer_store.CopyOnWrite()->indices = new_indices;
-    return std::move(buffer_store);
+  Array<PrimExpr> Legalize(const Array<PrimExpr> &indices) {
+    return indices.Map([this](const PrimExpr &i) {
+      return PromoteIndexIfNeeded(i, analyzer_);
+    });
   }
 
-  PrimExpr VisitExpr_(const BufferLoadNode *op) final {
-    auto buffer_load =
-        Downcast<BufferLoad>(IRMutatorWithAnalyzer::VisitExpr_(op));
-    auto indices = buffer_load->indices;
-    Array<PrimExpr> new_indices;
-    for (auto index : indices) {
-      if (index->dtype.is_int() && index->dtype.bits() < 64) {
-        auto int_bound = analyzer_->const_int_bound(index);
-        if (int_bound->max_value >= (1LL << (index->dtype.bits() - 1)) - 1 ||
-            int_bound->min_value < -(1LL << (index->dtype.bits() - 1))) {
-          Int64Promoter promoter;
-          index = promoter(index);
-          new_indices.push_back(index);
-          continue;
-        }
-      }
-      new_indices.push_back(index);
-    }
-    buffer_load.CopyOnWrite()->indices = new_indices;
-    return std::move(buffer_load);
+  Stmt VisitStmt_(const BufferStoreNode *op) final {
+    auto store =
+        IRMutatorWithAnalyzer::VisitStmt_(op).as_or_throw<BufferStore>();
+    auto indices = Legalize(store->indices);
+    if (!indices.same_as(store->indices))
+      store.CopyOnWrite()->indices = std::move(indices);
+    return store;
+  }
+
+  Expr VisitExpr_(const TensorLoadNode *op) final {
+    auto load = IRMutatorWithAnalyzer::VisitExpr_(op).as_or_throw<TensorLoad>();
+    auto indices = Legalize(load->indices);
+    if (!indices.same_as(load->indices))
+      load.CopyOnWrite()->indices = std::move(indices);
+    return load;
   }
 };
 
 tvm::transform::Pass ConfigIndexBitwidth() {
   using namespace tirx::transform;
   auto pass_func = [](PrimFunc f, const IRModule &m, const PassContext &ctx) {
-    auto *n = f.CopyOnWrite();
-    // Get pass config `tl.config_index_bitwidth`
-    tvm::transform::PassContext ctxt = tvm::transform::PassContext::Current();
-    Optional<Integer> opt_config_index_bitwidth =
-        ctxt->GetConfig(kConfigIndexBitwidth, Optional<Integer>());
-    if (opt_config_index_bitwidth.defined()) {
-      int config_index_bitwidth = opt_config_index_bitwidth.value()->value;
-      n->body = ConfigIndexBitwidthRewriter(config_index_bitwidth)(n->body);
+    if (auto bits = ctx->GetConfig<int64_t>(kConfigIndexBitwidth)) {
+      f = ConfigIndexBitwidthRewriter(PrimType::Int(bits.value()))
+              .Rewrite(std::move(f));
     }
-    // Legalize out-of-bound indices to be int64
-    n->body = IndexLegalizer::Rewrite(n->body);
+    Analyzer analyzer;
+    IndexLegalizer legalizer(analyzer);
+    auto body = legalizer.VisitStmt(f->body);
+    if (!body.same_as(f->body))
+      f.CopyOnWrite()->body = std::move(body);
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tl.ConfigIndexBitwidth", {});

@@ -6,6 +6,7 @@
 #define TVM_TL_TRANSFORM_COMMON_INT64_PROMOTER_H_
 
 #include "support/cast.h"
+#include <tvm/arith/analyzer.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt.h>
 
@@ -53,6 +54,19 @@ private:
     return type.MatchesCode(kDLInt) && type.bits() < 64;
   }
 };
+
+inline PrimExpr PromoteIndexIfNeeded(const PrimExpr &index,
+                                     arith::AnalyzerObj *analyzer) {
+  auto type = index.ty();
+  if (type.MatchesCode(kDLInt) && type.bits() < 64) {
+    const auto bound = analyzer->const_int_bound(index);
+    const int64_t limit = int64_t{1} << (type.bits() - 1);
+    if (bound->max_value >= limit - 1 || bound->min_value < -limit) {
+      return Int64Promoter()(index).as_or_throw<PrimExpr>();
+    }
+  }
+  return index;
+}
 
 } // namespace tl
 } // namespace tvm

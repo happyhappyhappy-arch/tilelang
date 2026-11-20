@@ -27,25 +27,25 @@
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/transform.h>
 
-#include "arith/ir_mutator_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
 
 namespace tvm {
 namespace tl {
 
 using namespace tirx;
 
-class LetInliner : public arith::IRMutatorWithAnalyzer {
+class LetInliner : public tirx::IRMutatorWithAnalyzer {
 public:
   static PrimFunc Substitute(PrimFunc f) {
     arith::Analyzer analyzer;
-    LetInliner substituter(&analyzer);
+    LetInliner substituter(analyzer);
     PrimFuncNode *fptr = f.CopyOnWrite();
     fptr->body = substituter.VisitStmt(f->body);
     return f;
   }
 
 private:
-  using arith::IRMutatorWithAnalyzer::IRMutatorWithAnalyzer;
+  using tirx::IRMutatorWithAnalyzer::IRMutatorWithAnalyzer;
 
   Stmt VisitStmt_(const ForNode *node) final {
     if (node->kind == ForKind::kParallel) {
@@ -58,26 +58,26 @@ private:
     return n;
   }
 
-  PrimExpr VisitExpr_(const VarNode *node) final {
+  Expr VisitExpr_(const VarNode *node) final {
     if (let_bindings_.count(node)) {
-      return arith::IRMutatorWithAnalyzer::VisitExpr(let_bindings_[node]);
+      return tirx::IRMutatorWithAnalyzer::VisitExpr(let_bindings_[node]);
     } else {
-      return arith::IRMutatorWithAnalyzer::VisitExpr_(node);
+      return tirx::IRMutatorWithAnalyzer::VisitExpr_(node);
     }
   }
 
   Stmt VisitStmt_(const BindNode *node) final {
     let_bindings_[node->var.get()] = node->value;
-    return Evaluate(Integer(0));
+    return Evaluate(IntImm::Int32(0));
   }
 
-  PrimExpr VisitExpr_(const LetNode *node) final {
+  Expr VisitExpr_(const prim::LetNode *node) final {
     let_bindings_[node->var.get()] = node->value;
-    return arith::IRMutatorWithAnalyzer::VisitExpr(node->body);
+    return tirx::IRMutatorWithAnalyzer::VisitExpr(node->body);
   }
 
   int parallel_for_scope_ = 0;
-  std::unordered_map<const VarNode *, PrimExpr> let_bindings_;
+  std::unordered_map<const VarNode *, Expr> let_bindings_;
 };
 
 using namespace tirx::transform;
