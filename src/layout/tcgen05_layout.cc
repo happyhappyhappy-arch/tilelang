@@ -29,7 +29,7 @@ const cute::Layout kColOnly = cute::Layout::Parse("(1,1):(0,1)");
 namespace {
 
 IterVar MakeIterVar(std::string name, Range dom) {
-  Var var = Var(name, dom->min->dtype);
+  PrimVar var(name, dom->min.ty());
   return IterVar(dom, var, IterVarType::kDataPar);
 }
 
@@ -323,7 +323,7 @@ Fragment FragmentToTileLang(const cute::Layout &layout) {
     int64_t size = cute::AsConst(cute::Product(layout->shape[i]));
     IterVar iv =
         MakeIterVar("i" + std::to_string(i), Range(0, static_cast<int>(size)));
-    analyzer.Bind(iv->var, iv->dom);
+    analyzer->Bind(iv->var, iv->dom);
     ivs.push_back(iv);
     coords.push_back(iv->var);
   }
@@ -334,10 +334,11 @@ Fragment FragmentToTileLang(const cute::Layout &layout) {
   Array<cute::IntTuple> fields = cute::TupleFields(tv_coord);
   ICHECK_EQ(fields.size(), 2U)
       << "Fragment must map into (thread@0, value@1), got " << tv_coord;
-  DataType dtype = DataType::Int(32);
+  PrimType dtype = PrimType::Int(32);
   PrimExpr thread =
-      analyzer.Simplify(cute::AsConstOrPrimExpr(fields[0], dtype));
-  PrimExpr value = analyzer.Simplify(cute::AsConstOrPrimExpr(fields[1], dtype));
+      analyzer->Simplify(cute::AsConstOrPrimExpr(fields[0], dtype));
+  PrimExpr value =
+      analyzer->Simplify(cute::AsConstOrPrimExpr(fields[1], dtype));
   return Fragment(ivs, {value}, thread, MakeIterVar("rep", Range(0, 1)));
 }
 

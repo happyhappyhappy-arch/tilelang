@@ -11,8 +11,8 @@
 #include "../layout/layout.h"
 #include "../layout/utils.h"
 
+#include "support/cast.h"
 #include <tvm/ffi/extra/structural_equal.h>
-#include <tvm/ir/cast.h>
 #include <tvm/tirx/op_attr_types.h>
 
 #include <vector>
@@ -52,7 +52,7 @@ const Impl &ResolveScanImpl(Target target, const char *op_name) {
 }
 
 template <typename ScanOpNode>
-void InitScanOpNode(ScanOpNode *node, const Array<PrimExpr> &args,
+void InitScanOpNode(ScanOpNode *node, const Array<Expr> &args,
                     const char *op_name) {
   ICHECK_EQ(args.size(), 4);
   auto src_access = NormalizeToAccessRegion(args[0], kAccessRead);
@@ -63,7 +63,7 @@ void InitScanOpNode(ScanOpNode *node, const Array<PrimExpr> &args,
   node->src = node->srcRegion_->buffer;
   node->dst = node->dstRegion_->buffer;
   node->dim = args[2].as<IntImm>().value()->value;
-  node->reverse = args[3].as<Bool>().value();
+  node->reverse = GetBoolImm(args[3]);
   ICHECK_LT(node->dim, static_cast<int>(node->src->shape.size()))
       << "The dim of " << op_name
       << " should be less than the number of dimensions. Got dim=" << node->dim
@@ -80,11 +80,11 @@ LayoutMap InferScanLayout(const ScanOpNode &op,
 
   LayoutMap result_map;
 
-  auto make_linear_layout = [](const Buffer &buf) -> Layout {
+  auto make_linear_layout = [](const BufferVar &buf) -> Layout {
     return MakeLinearLayout(buf->shape);
   };
 
-  auto check_or_set_linear_layout = [&](const Buffer &buf) {
+  auto check_or_set_linear_layout = [&](const BufferVar &buf) {
     if (!IsSharedBuffer(buf))
       return;
 
@@ -94,7 +94,7 @@ LayoutMap InferScanLayout(const ScanOpNode &op,
           layout_args.layout_map.Get(buf).value().as<Layout>().value();
       ICHECK(StructuralEqual()(existing, linear_layout))
           << pretty_name << " requires linear layout for shared buffer "
-          << buf->name << ", but got non-linear layout.";
+          << buf.name() << ", but got non-linear layout.";
     } else {
       result_map.Set(buf, linear_layout);
     }
@@ -132,7 +132,7 @@ TileOperator CumMaxOpNode::Clone() const {
   return CumMaxOp(op);
 }
 
-CumSumOp::CumSumOp(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
+CumSumOp::CumSumOp(Array<Expr> args, Map<String, Any> annotations) {
   ObjectPtr<CumSumOpNode> node = make_object<CumSumOpNode>();
   InitScanOpNode(node.get(), args, "cumsum");
   data_ = std::move(node);
@@ -152,9 +152,9 @@ LayoutMap CumSumOpNode::InferLayout(const LayoutInferArgs &layout_args,
 TIR_REGISTER_TL_TILE_OP(CumSumOp, cumsum)
     .set_num_inputs(4)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
-CumMaxOp::CumMaxOp(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
+CumMaxOp::CumMaxOp(Array<Expr> args, Map<String, Any> annotations) {
   ObjectPtr<CumMaxOpNode> node = make_object<CumMaxOpNode>();
   InitScanOpNode(node.get(), args, "cummax");
   data_ = std::move(node);
@@ -174,7 +174,7 @@ LayoutMap CumMaxOpNode::InferLayout(const LayoutInferArgs &layout_args,
 TIR_REGISTER_TL_TILE_OP(CumMaxOp, cummax)
     .set_num_inputs(4)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   CumSumOpNode::RegisterReflection();

@@ -49,8 +49,8 @@ public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(GemmBlockScaled, Gemm,
                                              GemmBlockScaledNode);
   TVM_DLL
-  GemmBlockScaled(ffi::Array<PrimExpr> args,
-                  ffi::Map<ffi::String, ffi::ObjectRef> annotations = {});
+  GemmBlockScaled(ffi::Array<Expr> args,
+                  ffi::Map<ffi::String, ffi::Any> annotations = {});
   static const Op &Get();
 };
 

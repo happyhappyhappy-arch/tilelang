@@ -15,30 +15,30 @@ using namespace tirx;
 TIR_DEFINE_TL_BUILTIN(ds_read_tr16_b64)
     .set_num_inputs(1)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kPure));
+                               static_cast<int64_t>(CallEffectKind::kPure));
 
 TIR_DEFINE_TL_BUILTIN(ds_read_tr8_b64)
     .set_num_inputs(1)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kPure));
+                               static_cast<int64_t>(CallEffectKind::kPure));
 
 TIR_DEFINE_TL_BUILTIN(tvm_mfma).set_num_inputs(12).set_attr<TCallEffectKind>(
-    "TCallEffectKind", Integer(CallEffectKind::kOpaque));
+    "TCallEffectKind", static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TIR_DEFINE_TL_BUILTIN(tvm_mfma_store)
     .set_num_inputs(6)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TIR_DEFINE_TL_BUILTIN(tvm_rdna_wmma)
     .set_num_inputs(12)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TIR_DEFINE_TL_BUILTIN(tvm_rdna_wmma_store)
     .set_num_inputs(6)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 } // namespace tl
 } // namespace tvm

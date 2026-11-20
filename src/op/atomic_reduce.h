@@ -25,10 +25,10 @@ using namespace ffi;
 class AtomicOpBaseNode : public TileOperatorNode {
 public:
   PrimExpr src_value; ///< Source values, for cases src is not a buffer
-  Buffer src, dst;    ///< Source and destination buffers
+  BufferVar src, dst; ///< Source and destination buffers
   Array<Range> src_range,
       dst_range; ///< Access ranges for source and destination
-  Map<String, ObjectRef> annotations; ///< Annotations for the atomic operation
+  Map<String, Any> annotations; ///< Annotations for the atomic operation
   // Supported annotation keys:
   //   - "coalesced_width": IntImm, width for memory coalescing optimization
   //   - "memory_order": IntImm, memory order for atomic operations
@@ -101,8 +101,8 @@ public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(AtomicMax, TileOperator,
                                              AtomicMaxNode);
   TVM_DLL
-  AtomicMax(Array<PrimExpr> args,
-            Map<String, ObjectRef> annotations = Map<String, ObjectRef>());
+  AtomicMax(Array<Expr> args,
+            Map<String, Any> annotations = Map<String, Any>());
   static const Op &Get();
 };
 
@@ -134,8 +134,8 @@ public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(AtomicMin, TileOperator,
                                              AtomicMinNode);
   TVM_DLL
-  AtomicMin(Array<PrimExpr> args,
-            Map<String, ObjectRef> annotations = Map<String, ObjectRef>());
+  AtomicMin(Array<Expr> args,
+            Map<String, Any> annotations = Map<String, Any>());
   static const Op &Get();
 };
 

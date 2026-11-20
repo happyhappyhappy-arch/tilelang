@@ -7,10 +7,10 @@
 
 #include "support/check.h"
 #include <tvm/ir/op.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/target/codegen.h>
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/builtin.h>
-#include <tvm/tirx/expr.h>
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/op_attr_types.h>
 #include <tvm/tirx/stmt.h>
@@ -21,7 +21,7 @@
 
 // from tvm/src/
 #include "target/source/codegen_source_base.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 
 namespace tvm {
 namespace codegen {
@@ -32,7 +32,7 @@ using namespace ffi;
  * \brief A base class to generate simple Python code.
  */
 class CodeGenTileLangPY
-    : public ExprFunctor<void(const PrimExpr &, std::ostream &)>,
+    : public ExprFunctor<void(const Expr &, std::ostream &)>,
       public StmtFunctor<void(const Stmt &)>,
       public CodeGenSourceBase {
 public:
@@ -98,7 +98,7 @@ protected:
   void ReserveKeywordsAsUnique_();
 
   void PrintSSAAssign(const std::string &target, const std::string &src,
-                      DataType t) override;
+                      const Type &t) override;
 
 protected:
   /*!
@@ -106,7 +106,7 @@ protected:
    * \param t The type representation.
    * \param os The output stream
    */
-  void PrintType(DataType type, std::ostream &os) override; // NOLINT(*)
+  void PrintType(const PrimType &type, std::ostream &os) override; // NOLINT(*)
 
   /*!
    * \brief Print the Stmt n to CodeGenTileLangPY->stream
@@ -118,14 +118,14 @@ protected:
    * \param n The expression to be printed.
    * \param os The output stream
    */
-  void PrintExpr_(const PrimExpr &n, std::ostream &os) { // NOLINT(*)
+  void PrintExpr_(const Expr &n, std::ostream &os) { // NOLINT(*)
     VisitExpr(n, os);
   }
   /*!
    * \brief Same as PrintExpr_, but simply returns result string
    * \param n The expression to be printed.
    */
-  std::string PrintExpr_(const PrimExpr &n) {
+  std::string PrintExpr_(const Expr &n) {
     std::ostringstream os;
     PrintExpr_(n, os);
     return os.str();
@@ -136,29 +136,48 @@ protected:
   void VisitExpr_(const IntImmNode *op, std::ostream &os) override; // NOLINT(*)
   void VisitExpr_(const FloatImmNode *op,
                   std::ostream &os) override; // NOLINT(*)
-  void VisitExpr_(const StringImmNode *op,
+  void VisitExpr_(const prim::StringImmNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::CastNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::AddNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::SubNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::MulNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::DivNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::ModNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::MinNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::MaxNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::EQNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::NENode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::LTNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::LENode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::GTNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::GENode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::AndNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::OrNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::NotNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::SelectNode *op,
+                  std::ostream &os) override; // NOLINT(*)
+  void VisitExpr_(const prim::RampNode *op,
                   std::ostream &os) override;                       // NOLINT(*)
-  void VisitExpr_(const CastNode *op, std::ostream &os) override;   // NOLINT(*)
-  void VisitExpr_(const AddNode *op, std::ostream &os) override;    // NOLINT(*)
-  void VisitExpr_(const SubNode *op, std::ostream &os) override;    // NOLINT(*)
-  void VisitExpr_(const MulNode *op, std::ostream &os) override;    // NOLINT(*)
-  void VisitExpr_(const DivNode *op, std::ostream &os) override;    // NOLINT(*)
-  void VisitExpr_(const ModNode *op, std::ostream &os) override;    // NOLINT(*)
-  void VisitExpr_(const MinNode *op, std::ostream &os) override;    // NOLINT(*)
-  void VisitExpr_(const MaxNode *op, std::ostream &os) override;    // NOLINT(*)
-  void VisitExpr_(const EQNode *op, std::ostream &os) override;     // NOLINT(*)
-  void VisitExpr_(const NENode *op, std::ostream &os) override;     // NOLINT(*)
-  void VisitExpr_(const LTNode *op, std::ostream &os) override;     // NOLINT(*)
-  void VisitExpr_(const LENode *op, std::ostream &os) override;     // NOLINT(*)
-  void VisitExpr_(const GTNode *op, std::ostream &os) override;     // NOLINT(*)
-  void VisitExpr_(const GENode *op, std::ostream &os) override;     // NOLINT(*)
-  void VisitExpr_(const AndNode *op, std::ostream &os) override;    // NOLINT(*)
-  void VisitExpr_(const OrNode *op, std::ostream &os) override;     // NOLINT(*)
-  void VisitExpr_(const NotNode *op, std::ostream &os) override;    // NOLINT(*)
-  void VisitExpr_(const SelectNode *op, std::ostream &os) override; // NOLINT(*)
-  void VisitExpr_(const RampNode *op, std::ostream &os) override;   // NOLINT(*)
   void VisitExpr_(const CallNode *op, std::ostream &os) override;   // NOLINT(*)
-  void VisitExpr_(const BufferLoadNode *op,
+  void VisitExpr_(const TensorLoadNode *op,
                   std::ostream &os) override; // NOLINT(*)
 
   // statement
@@ -172,14 +191,17 @@ protected:
   void VisitStmt_(const IfThenElseNode *op) override;
   void VisitStmt_(const SeqStmtNode *op) override;
   void VisitStmt_(const EvaluateNode *op) override;
+  void VisitStmt_(const ReturnNode *op) override;
+  void VisitStmt_(const BreakNode *op) override;
+  void VisitStmt_(const ContinueNode *op) override;
   void VisitStmt_(const AssertStmtNode *op) override;
 
 protected:
   // Get a string of type casting
-  virtual std::string CastFromTo_(const std::string &value, DataType from,
-                                  DataType target);
+  virtual std::string CastFromTo_(const std::string &value, PrimType from,
+                                  PrimType target);
 
-  virtual void PrintBinaryExpr_(const std::string &opstr, DataType dtype,
+  virtual void PrintBinaryExpr_(const std::string &opstr, PrimType dtype,
                                 PrimExpr lhs, PrimExpr rhs,
                                 std::ostream &os); // NOLINT(*)
   virtual void PrintBinaryIntrinsic_(const CallNode *op, const char *opstr,
@@ -194,12 +216,11 @@ protected:
    * \param os The output stream.
    */
   virtual void PrintCallExtern_(Type ret_type, String global_symbol,
-                                const Array<PrimExpr> &args,
-                                bool skip_first_arg,
+                                const Array<Expr> &args, bool skip_first_arg,
                                 std::ostream &os); // NOLINT(*)
 
   // Print reference to a buffer as type t in index.
-  virtual std::string GetBufferRef_(DataType t, const BufferNode *buffer,
+  virtual std::string GetBufferRef_(PrimType t, const VarNode *buffer,
                                     PrimExpr index);
 
   /*!
@@ -207,14 +228,14 @@ protected:
    * \param buf_var The buffer variable.
    * \param t The type to be checked.
    */
-  void RegisterHandleType_(const VarNode *buf_var, DataType t);
+  void RegisterHandleType_(const VarNode *buf_var, PrimType t);
 
   /*!
    * \brief If buffer is allocated as type t.
    * \param buf_var The buffer variable.
    * \param t The type to be checked.
    */
-  bool HandleTypeMatch_(const VarNode *buf_var, DataType t) const;
+  bool HandleTypeMatch_(const VarNode *buf_var, PrimType t) const;
 
 protected:
   /*! \brief the storage scope of allocation */
@@ -230,7 +251,7 @@ protected:
 
 private:
   /*! \brief the data type of allocated buffers */
-  std::unordered_map<const VarNode *, DataType> handle_data_type_;
+  std::unordered_map<const VarNode *, PrimType> handle_data_type_;
 
   /* \brief Map of GlobalVar to their symbol.
    *
@@ -242,7 +263,7 @@ private:
   std::unordered_map<GlobalVar, String> internal_functions_;
 
   /* \brief Name supply to generate unique function names */
-  NameSupply func_name_supply_;
+  UniqueNameSupply func_name_supply_;
 
   /*!
    * \brief Escape a string to be a valid Python double-quoted string literal.

@@ -22,8 +22,8 @@
  * \brief Common utilities for TL transforms
  */
 
+#include "support/cast.h"
 #include "support/check.h"
-#include <tvm/ir/cast.h>
 #include <tvm/s_tir/utils.h>
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/op.h>
@@ -35,13 +35,12 @@
 #include "../../op/parallel.h"
 #include "../loop_partition.h"
 #include "../loop_vectorize.h"
-#include "arith/ir_mutator_with_analyzer.h"
+#include "tirx/ir_mutator_with_analyzer.h"
 
 namespace tvm {
 namespace tl {
 
 using namespace tirx;
-using arith::IRMutatorWithAnalyzer;
 
 class FragmentAccessDetector : public StmtExprVisitor {
 public:
@@ -52,9 +51,10 @@ public:
   bool HasFragmentAccess() { return has_fragment_access_; }
 
 private:
-  void VisitExpr_(const BufferLoadNode *op) final {
+  void VisitExpr_(const TensorLoadNode *op) final {
     // Check if the buffer is in global scope
-    if (IsFragmentBuffer(op->buffer)) {
+    if (auto buffer = op->source.as<BufferVar>();
+        buffer && IsFragmentBuffer(*buffer)) {
       has_fragment_access_ = true;
     }
     StmtExprVisitor::VisitExpr_(op);
@@ -69,7 +69,7 @@ private:
   }
 
   // Helper function to determine if a buffer is local.fragment
-  bool IsFragmentBuffer(const Buffer &buffer) {
+  bool IsFragmentBuffer(const BufferVar &buffer) {
     // The storage scope is often encoded in the buffer->data var name or
     // associated attributes.
     ffi::String scope = buffer.scope();
@@ -101,7 +101,7 @@ public:
 
 protected:
   ParallelLoopFuser(arith::Analyzer *analyzer)
-      : IRMutatorWithAnalyzer(analyzer) {};
+      : IRMutatorWithAnalyzer(*analyzer) {};
 
   virtual bool PreserveParallelLoopNest(const ForNode *) const { return false; }
 
@@ -119,7 +119,7 @@ protected:
     while (true) {
       if (current->kind != ForKind::kParallel)
         break;
-      if (!is_zero(current->min))
+      if (!is_zero(current->min) || (current->step && !is_one(*current->step)))
         break;
       loop_chain.push_back(current);
 
@@ -152,20 +152,20 @@ protected:
 
     // At this point we have multiple nested parallel loops starting at zero
     // We will fuse them all.
-    PrimExpr fused_extent = make_const(DataType::Int(32), 1);
+    PrimExpr fused_extent = MakeConst(PrimType::Int(32), 1);
     for (auto it = loop_chain.rbegin(); it != loop_chain.rend(); ++it) {
       fused_extent = fused_extent * (*it)->extent;
     }
 
     std::string fused_name;
     for (auto it = loop_chain.begin(); it != loop_chain.end(); ++it) {
-      fused_name += (*it)->loop_var->name_hint + "_";
+      fused_name += (*it)->loop_var->name + "_";
     }
 
     fused_name += "fused";
 
     // Create a new fused loop var
-    Var fused_var(fused_name, DataType::Int(32));
+    PrimVar fused_var(fused_name, PrimType::Int(32));
 
     // The body of the last loop in the chain:
     const ForNode *innermost_loop = loop_chain.back();
@@ -197,7 +197,7 @@ protected:
     }
 
     std::vector<PrimExpr> strides(loop_chain.size(),
-                                  make_const(DataType::Int(32), 1));
+                                  MakeConst(PrimType::Int(32), 1));
     for (int i = static_cast<int>(loop_chain.size()) - 2; i >= 0; i--) {
       strides[i] = strides[i + 1] * extents[i + 1];
     }
@@ -206,7 +206,7 @@ protected:
     // index_i = (f / strides[i]) % extents[i]
     // We'll define a helper lambda:
     auto create_index_expr = [&](int i) {
-      return FloorMod(FloorDiv(fused_var, strides[i]), extents[i]);
+      return prim::FloorMod(prim::FloorDiv(fused_var, strides[i]), extents[i]);
     };
 
     ffi::Map<Var, PrimExpr> var_map;
@@ -217,7 +217,8 @@ protected:
     }
 
     // Perform the substitution
-    body = Substitute(body, var_map);
+    body = SubstituteWithDataTypeLegalization(
+        body, [&](const Var &var) { return var_map.Get(var); });
 
     // Create the fused loop
     For fused_for = For(fused_var, 0, fused_extent, ForKind::kParallel, body);
@@ -234,8 +235,9 @@ protected:
       // Only attempt to fuse when dimensions match the number of fused loops.
       if (old_dim == loop_chain.size()) {
         ffi::Array<PrimExpr> new_shape = {fused_extent};
+        auto analyzer = ffi::GetRef<arith::Analyzer>(analyzer_);
         Fragment fused_layout =
-            Downcast<Fragment>(old_layout->Reshape(new_shape, analyzer_));
+            Downcast<Fragment>(old_layout->Reshape(new_shape, &analyzer));
         fused_for.CopyOnWrite()->annotations.Set(attr::kParallelLoopLayout,
                                                  fused_layout);
       } else {

@@ -18,7 +18,7 @@ using namespace tirx;
 using namespace ffi;
 
 /// Reject sub-byte numeric accumulators; bool reductions remain supported.
-void CheckReductionDType(DataType dtype, const char *op);
+void CheckReductionDType(PrimType dtype, const char *op);
 
 /// Supported reduction operation types
 enum class ReduceTypeEnum : uint8_t {
@@ -87,7 +87,7 @@ public:
 /// Node class for reduction operations
 class ReduceOpNode : public TileOperatorNode {
 public:
-  tirx::Buffer src, dst; ///< Source and destination buffers
+  tirx::BufferVar src, dst; ///< Source and destination buffers
   // Optional: keep the original regions used to construct this op
   BufferRegion srcRegion_, dstRegion_;
   int dim;         ///< Dimension to reduce along
@@ -105,7 +105,7 @@ public:
                              ///< (use __hmax_nan/__hmin_nan) instead of the
                              ///< default __hmax/__hmin which return the
                              ///< non-NaN operand.
-  Map<String, ObjectRef> annotations; ///< Backend-specific lowering controls.
+  Map<String, Any> annotations; ///< Backend-specific lowering controls.
 
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tl.ReduceOp", ReduceOpNode,
                                     TileOperatorNode);
@@ -154,8 +154,7 @@ public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ReduceOp, TileOperator,
                                              ReduceOpNode);
   TVM_DLL
-  ReduceOp(Array<PrimExpr> args,
-           Map<String, ObjectRef> annotations = Map<String, ObjectRef>());
+  ReduceOp(Array<Expr> args, Map<String, Any> annotations = Map<String, Any>());
   static const Op &Get();
 };
 

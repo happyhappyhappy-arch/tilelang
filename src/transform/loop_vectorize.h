@@ -45,10 +45,10 @@ int MaxVectorLoadBits(const Target &target, bool global_only_access);
 
 // Extract an existing BufferLoad, optionally wrapped in address_of/access_ptr.
 // tvm_access_ptr carries a flat offset instead and must be handled separately.
-ffi::Optional<BufferLoad> ExtractBufferLoadForAtomic(const PrimExpr &expr);
+ffi::Optional<TensorLoad> ExtractBufferLoadForAtomic(const PrimExpr &expr);
 
 // Target/dtype/address-space capability; access legality is checked separately.
-int GetMaxAtomicVectorSize(DataType dtype, const ffi::String &storage_scope,
+int GetMaxAtomicVectorSize(PrimType dtype, const ffi::String &storage_scope,
                            const Target &target);
 
 // After DecoupleTypeCast, set defer_cast_constraints=false so any remaining

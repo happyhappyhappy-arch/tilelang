@@ -4,11 +4,10 @@
 #include "codegen_py.h"
 #include "backend/common/codegen/codegen_utils.h"
 #include "support/check.h"
-#include <tvm/ir/cast.h>
 #include <tvm/runtime/logging.h>
 
 #include <tvm/arith/analyzer.h>
-#include <tvm/ir/name_supply.h>
+#include <tvm/ir/unique_name_supply.h>
 
 #include <cctype>
 
@@ -96,9 +95,11 @@ void CodeGenTileLangPY::PrintFunctionSignature_(const String &function_name,
 
   // Register handle data type
   for (const auto &param : func->params) {
-    if (auto *ptr = param->type_annotation.as<PointerTypeNode>()) {
+    if (auto buffer = param.as<BufferVar>()) {
+      RegisterHandleType_(param.get(), (*buffer)->dtype);
+    } else if (auto *ptr = param->ty.as<PointerTypeNode>()) {
       if (auto *prim = ptr->element_type.as<PrimTypeNode>()) {
-        RegisterHandleType_(param.get(), prim->dtype);
+        RegisterHandleType_(param.get(), GetRef<PrimType>(prim));
       }
     }
   }
@@ -158,20 +159,20 @@ void CodeGenTileLangPY::ReserveKeywordsAsUnique_() {
 }
 
 void CodeGenTileLangPY::PrintSSAAssign(const std::string &target,
-                                       const std::string &src, DataType t) {
+                                       const std::string &src, const Type &t) {
   PrintIndent();
   stream << target << " = " << RemoveOutermostParentheses(src) << "\n";
 }
 
-void CodeGenTileLangPY::PrintType(DataType type,
+void CodeGenTileLangPY::PrintType(const PrimType &type,
                                   std::ostream &os) { // NOLINT(*)
-  if (type.is_float()) {
+  if (type.MatchesCode(kDLFloat)) {
     if (type.bits() == 16 || type.bits() == 32 || type.bits() == 64) {
       os << "float";
     } else {
       LOG(FATAL) << "Cannot convert float" << type.bits() << " to Python type";
     }
-  } else if (type.is_uint()) {
+  } else if (type.MatchesCode(kDLUInt)) {
     switch (type.bits()) {
     case 8:
     case 16:
@@ -186,7 +187,7 @@ void CodeGenTileLangPY::PrintType(DataType type,
     default:
       LOG(FATAL) << "Cannot convert uint" << type.bits() << " to Python type";
     }
-  } else if (type.is_int()) {
+  } else if (type.MatchesCode(kDLInt)) {
     switch (type.bits()) {
     case 8:
     case 16:
@@ -213,7 +214,7 @@ void CodeGenTileLangPY::VisitExpr_(const VarNode *op,
 
 void CodeGenTileLangPY::VisitExpr_(const IntImmNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  if (op->dtype == DataType::Bool()) {
+  if (op->ty.as_or_throw<PrimType>() == PrimType::Bool()) {
     os << (op->value ? "True" : "False");
   } else {
     std::ostringstream temp;
@@ -225,7 +226,7 @@ void CodeGenTileLangPY::VisitExpr_(const IntImmNode *op,
 
 void CodeGenTileLangPY::VisitExpr_(const FloatImmNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  switch (op->dtype.bits()) {
+  switch (op->ty.as_or_throw<PrimType>().bits()) {
   case 64:
   case 32: {
     std::ostringstream temp;
@@ -235,103 +236,108 @@ void CodeGenTileLangPY::VisitExpr_(const FloatImmNode *op,
     break;
   }
   case 16: {
-    PrintType(op->dtype, os);
+    PrintType(op->ty.as_or_throw<PrimType>(), os);
     os << "(float.fromhex('" << FlexibleHexFormat(op->value) << "'))";
     break;
   }
   default:
-    LOG(FATAL) << "Bad bit-width for float: " << op->dtype << "\n";
+    LOG(FATAL) << "Bad bit-width for float: " << op->ty.as_or_throw<PrimType>()
+               << "\n";
   }
 }
 
-void CodeGenTileLangPY::VisitExpr_(const StringImmNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::StringImmNode *op,
                                    std::ostream &os) { // NOLINT(*)
   EscapeStringLiteral_(op->value, os);
 }
 
-void CodeGenTileLangPY::VisitExpr_(const CastNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::CastNode *op,
                                    std::ostream &os) { // NOLINT(*)
   std::stringstream value;
   PrintExpr_(op->value, value);
-  os << CastFromTo_(value.str(), op->value.dtype(), op->dtype);
+  os << CastFromTo_(value.str(), op->value.ty(),
+                    op->ty.as_or_throw<PrimType>());
 }
 
-void CodeGenTileLangPY::VisitExpr_(const AddNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::AddNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  PrintBinaryExpr_("+", op->dtype, op->a, op->b, os);
+  PrintBinaryExpr_("+", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
-void CodeGenTileLangPY::VisitExpr_(const SubNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::SubNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  PrintBinaryExpr_("-", op->dtype, op->a, op->b, os);
+  PrintBinaryExpr_("-", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
-void CodeGenTileLangPY::VisitExpr_(const MulNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::MulNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  PrintBinaryExpr_("*", op->dtype, op->a, op->b, os);
+  PrintBinaryExpr_("*", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
-void CodeGenTileLangPY::VisitExpr_(const DivNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::DivNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  if (op->dtype.is_int() || op->dtype.is_uint()) {
-    PrintBinaryExpr_("//", op->dtype, op->a, op->b, os);
+  if (op->ty.as_or_throw<PrimType>().MatchesCode(kDLInt) ||
+      op->ty.as_or_throw<PrimType>().MatchesCode(kDLUInt)) {
+    PrintBinaryExpr_("//", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
   } else {
-    PrintBinaryExpr_("/", op->dtype, op->a, op->b, os);
+    PrintBinaryExpr_("/", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
   }
 }
-void CodeGenTileLangPY::VisitExpr_(const ModNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::ModNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  ICHECK(op->dtype.is_int() || op->dtype.is_uint() || op->dtype.is_float())
+  ICHECK(op->ty.as_or_throw<PrimType>().MatchesCode(kDLInt) ||
+         op->ty.as_or_throw<PrimType>().MatchesCode(kDLUInt) ||
+         op->ty.as_or_throw<PrimType>().MatchesCode(kDLFloat))
       << "Expected floating point or integer dtype in Mod, but got "
-      << op->dtype;
-  PrintBinaryExpr_("%", op->dtype, op->a, op->b, os);
+      << op->ty.as_or_throw<PrimType>();
+  PrintBinaryExpr_("%", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
 
-void CodeGenTileLangPY::VisitExpr_(const MinNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::MinNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  PrintBinaryExpr_("min", op->dtype, op->a, op->b, os);
+  PrintBinaryExpr_("min", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
-void CodeGenTileLangPY::VisitExpr_(const MaxNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::MaxNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  PrintBinaryExpr_("max", op->dtype, op->a, op->b, os);
+  PrintBinaryExpr_("max", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
-void CodeGenTileLangPY::VisitExpr_(const EQNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::EQNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  PrintBinaryExpr_("==", op->dtype, op->a, op->b, os);
+  PrintBinaryExpr_("==", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
-void CodeGenTileLangPY::VisitExpr_(const NENode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::NENode *op,
                                    std::ostream &os) { // NOLINT(*)
-  PrintBinaryExpr_("!=", op->dtype, op->a, op->b, os);
+  PrintBinaryExpr_("!=", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
-void CodeGenTileLangPY::VisitExpr_(const LTNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::LTNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  PrintBinaryExpr_("<", op->dtype, op->a, op->b, os);
+  PrintBinaryExpr_("<", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
-void CodeGenTileLangPY::VisitExpr_(const LENode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::LENode *op,
                                    std::ostream &os) { // NOLINT(*)
-  PrintBinaryExpr_("<=", op->dtype, op->a, op->b, os);
+  PrintBinaryExpr_("<=", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
-void CodeGenTileLangPY::VisitExpr_(const GTNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::GTNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  PrintBinaryExpr_(">", op->dtype, op->a, op->b, os);
+  PrintBinaryExpr_(">", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
-void CodeGenTileLangPY::VisitExpr_(const GENode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::GENode *op,
                                    std::ostream &os) { // NOLINT(*)
-  PrintBinaryExpr_(">=", op->dtype, op->a, op->b, os);
+  PrintBinaryExpr_(">=", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
-void CodeGenTileLangPY::VisitExpr_(const AndNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::AndNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  PrintBinaryExpr_("and", op->dtype, op->a, op->b, os);
+  PrintBinaryExpr_("and", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
-void CodeGenTileLangPY::VisitExpr_(const OrNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::OrNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  PrintBinaryExpr_("or", op->dtype, op->a, op->b, os);
+  PrintBinaryExpr_("or", op->ty.as_or_throw<PrimType>(), op->a, op->b, os);
 }
-void CodeGenTileLangPY::VisitExpr_(const NotNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::NotNode *op,
                                    std::ostream &os) { // NOLINT(*)
   os << "(not ";
   PrintExpr_(op->a, os);
   os << ")";
 }
 
-void CodeGenTileLangPY::VisitExpr_(const SelectNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::SelectNode *op,
                                    std::ostream &os) { // NOLINT(*)
   os << "(";
   PrintExpr_(op->true_value, os);
@@ -342,9 +348,9 @@ void CodeGenTileLangPY::VisitExpr_(const SelectNode *op,
   os << ")";
 }
 
-void CodeGenTileLangPY::VisitExpr_(const RampNode *op,
+void CodeGenTileLangPY::VisitExpr_(const prim::RampNode *op,
                                    std::ostream &os) { // NOLINT(*)
-  int lanes = op->dtype.lanes();
+  int lanes = op->ty.as_or_throw<PrimType>().lanes();
   os << "(";
   for (int i = 0; i < lanes; i++) {
     os << "(" << PrintExpr_(op->base) << ")"
@@ -360,8 +366,8 @@ void CodeGenTileLangPY::VisitExpr_(const CallNode *op,
   if (auto opt_call_op = op->op.as<Op>()) {
     const auto &call_op = opt_call_op.value();
 
-    if (op->op.same_as(builtin::ret())) {
-      os << "return " << RemoveOutermostParentheses(PrintExpr_(op->args[0]));
+    if (op->op.same_as(builtin::buffer_data())) {
+      PrintExpr_(op->args[0], os);
     } else if (op->op.same_as(builtin::continue_loop())) {
       os << "continue";
     } else if (op->op.same_as(builtin::break_loop())) {
@@ -369,45 +375,44 @@ void CodeGenTileLangPY::VisitExpr_(const CallNode *op,
     } else if (op->op.same_as(builtin_call_extern_) ||
                op->op.same_as(builtin_call_pure_extern_)) {
       ICHECK_GE(op->args.size(), 1U);
-      auto func = Downcast<StringImm>(op->args[0]);
-      PrintCallExtern_(GetType(GetRef<PrimExpr>(op)), func->value, op->args,
-                       true, os);
+      auto func = op->args[0].as_or_throw<prim::StringImm>();
+      PrintCallExtern_(op->ty, func->value, op->args, true, os);
     } else if (op_attr_global_symbol_.count(call_op)) {
       // call extern if the op itself have a global symbol.
-      PrintCallExtern_(GetType(GetRef<PrimExpr>(op)),
-                       op_attr_global_symbol_[call_op], op->args, false, os);
+      PrintCallExtern_(op->ty, op_attr_global_symbol_[call_op], op->args, false,
+                       os);
     } else if (op->op.same_as(builtin::large_uint_imm())) {
       ICHECK_EQ(op->args.size(), 2U);
       uint64_t low =
-          static_cast<uint64_t>(Downcast<IntImm>(op->args[0])->value);
+          static_cast<uint64_t>(op->args[0].as_or_throw<IntImm>()->value);
       uint64_t high =
-          static_cast<uint64_t>(Downcast<IntImm>(op->args[1])->value);
+          static_cast<uint64_t>(op->args[1].as_or_throw<IntImm>()->value);
       uint64_t val = (high << 32U) | low;
 
-      if (op->dtype == DataType::UInt(32)) {
+      if (op->ty.as_or_throw<PrimType>() == PrimType::UInt(32)) {
         std::ostringstream temp;
         temp << val;
         MarkConst(temp.str());
         os << temp.str();
       } else {
-        PrintType(op->dtype, os);
+        PrintType(op->ty.as_or_throw<PrimType>(), os);
         os << "(" << val << ")";
       }
-    } else if (op->op.same_as(builtin::bitwise_and())) {
+    } else if (op->op.same_as(prim::builtin::bitwise_and())) {
       PrintBinaryIntrinsic_(op, "&", os);
-    } else if (op->op.same_as(builtin::bitwise_or())) {
+    } else if (op->op.same_as(prim::builtin::bitwise_or())) {
       PrintBinaryIntrinsic_(op, "|", os);
-    } else if (op->op.same_as(builtin::bitwise_xor())) {
+    } else if (op->op.same_as(prim::builtin::bitwise_xor())) {
       PrintBinaryIntrinsic_(op, "^", os);
-    } else if (op->op.same_as(builtin::bitwise_not())) {
+    } else if (op->op.same_as(prim::builtin::bitwise_not())) {
       ICHECK_EQ(op->args.size(), 1U);
       os << "~";
       PrintExpr_(op->args[0], os);
-    } else if (op->op.same_as(builtin::shift_left())) {
+    } else if (op->op.same_as(prim::builtin::shift_left())) {
       PrintBinaryIntrinsic_(op, "<<", os);
-    } else if (op->op.same_as(builtin::shift_right())) {
+    } else if (op->op.same_as(prim::builtin::shift_right())) {
       PrintBinaryIntrinsic_(op, ">>", os);
-    } else if (op->op.same_as(builtin::if_then_else())) {
+    } else if (op->op.same_as(prim::builtin::if_then_else())) {
 
       std::string cond = PrintExpr_(op->args[0]);
       std::string true_val = PrintExpr_(op->args[1]);
@@ -430,8 +435,7 @@ void CodeGenTileLangPY::VisitExpr_(const CallNode *op,
   } else if (auto opt = op->op.as<GlobalVar>()) {
     const auto &gvar = opt.value();
     auto callee_name = GetFunctionName_(gvar);
-    PrintCallExtern_(GetType(GetRef<PrimExpr>(op)), callee_name, op->args,
-                     false, os);
+    PrintCallExtern_(op->ty, callee_name, op->args, false, os);
   } else {
     LOG(FATAL)
         << "CodeGenTileLangPY: Unknown operation " << op->op
@@ -440,33 +444,29 @@ void CodeGenTileLangPY::VisitExpr_(const CallNode *op,
   }
 }
 
-void CodeGenTileLangPY::VisitExpr_(const BufferLoadNode *op,
+void CodeGenTileLangPY::VisitExpr_(const TensorLoadNode *op,
                                    std::ostream &os) { // NOLINT(*)
   ICHECK_EQ(op->indices.size(), 1)
       << "Load from non-flat memory not supported.";
-  ICHECK(!op->predicate.defined())
-      << "Predicated buffer load is not supported.";
+  const BufferVar buffer = op->source.as_or_throw<BufferVar>();
 
-  DataType value_dtype = op->dtype;
+  PrimType value_dtype = op->ty.as_or_throw<PrimType>();
   PrimExpr index = op->indices[0];
-  Var buffer_var = op->buffer->data;
-  DataType element_dtype = op->buffer->dtype;
+  PrimType element_dtype = buffer->dtype;
 
   ICHECK_EQ(value_dtype, element_dtype)
-      << "value_dtype and element_dtype must be same for a BufferLoadNode";
-  std::string ref = GetBufferRef_(op->dtype, op->buffer.get(), index);
+      << "value_dtype and element_dtype must be same for a TensorLoadNode";
+  std::string ref =
+      GetBufferRef_(op->ty.as_or_throw<PrimType>(), buffer.get(), index);
   os << ref;
 }
 
 void CodeGenTileLangPY::VisitStmt_(const BufferStoreNode *op) {
   ICHECK_EQ(op->indices.size(), 1) << "Store to non-flat memory not supported.";
-  ICHECK(!op->predicate.defined())
-      << "Predicated buffer store is not supported.";
 
-  DataType value_dtype = op->value.dtype();
-  DataType element_dtype = op->buffer->dtype;
+  PrimType value_dtype = op->value.ty();
+  PrimType element_dtype = op->buffer->dtype;
   PrimExpr index_expr = op->indices[0];
-  Var buffer_var = op->buffer->data;
 
   ICHECK_EQ(value_dtype, element_dtype)
       << "value_dtype and element_dtype must be same for a BufferStoreNode";
@@ -477,8 +477,12 @@ void CodeGenTileLangPY::VisitStmt_(const BufferStoreNode *op) {
 }
 
 void CodeGenTileLangPY::VisitStmt_(const DeclBufferNode *op) {
-  // In the flat IR model, DeclBuffer is a leaf statement with no body.
-  // The body is a sibling handled by the SeqStmt printer.
+  // The declaration binds a typed buffer view to its backing storage.
+  std::string source = PrintExpr_(op->data);
+  PrintIndent();
+  stream << AllocVarID(op->buffer.get()) << " = " << source << "\n";
+  alloc_storage_scope_[op->buffer.get()] = op->buffer.scope();
+  RegisterHandleType_(op->buffer.get(), op->buffer->dtype);
 }
 
 void CodeGenTileLangPY::VisitStmt_(const BindNode *op) {
@@ -488,7 +492,7 @@ void CodeGenTileLangPY::VisitStmt_(const BindNode *op) {
 }
 
 void CodeGenTileLangPY::VisitStmt_(const AllocBufferNode *op) {
-  std::string vid = AllocVarID(op->buffer->data.get());
+  std::string vid = AllocVarID(op->buffer.get());
 
   PrintIndent();
   auto alloc_ref = GetRef<AllocBuffer>(op);
@@ -497,12 +501,12 @@ void CodeGenTileLangPY::VisitStmt_(const AllocBufferNode *op) {
       << "Can only handle constant size stack allocation for now";
   size_t constant_size = static_cast<size_t>(opt_size.value());
 
-  auto scope = GetPtrStorageScope(op->buffer->data);
-  alloc_storage_scope_[op->buffer->data.get()] = scope;
+  auto scope = op->buffer.scope();
+  alloc_storage_scope_[op->buffer.get()] = scope;
 
   stream << vid << " = [None] * " << constant_size << "\n";
 
-  RegisterHandleType_(op->buffer->data.get(), op->buffer->dtype);
+  RegisterHandleType_(op->buffer.get(), op->buffer->dtype);
 }
 
 void CodeGenTileLangPY::VisitStmt_(const AttrStmtNode *op) {
@@ -513,13 +517,17 @@ void CodeGenTileLangPY::VisitStmt_(const ForNode *op) {
   PrintIndent();
   std::string vid = AllocVarID(op->loop_var.get());
   stream << "for " << vid << " in range(";
-  if (is_zero(op->min)) {
+  if (is_zero(op->min) && !op->step) {
     PrintExpr_(op->extent, stream);
   } else {
     PrintExpr_(op->min, stream);
     stream << ", ";
-    PrimExpr upper_bound = arith::Analyzer().Simplify(op->extent + op->min);
+    PrimExpr upper_bound = arith::Analyzer()->Simplify(op->extent + op->min);
     PrintExpr_(upper_bound, stream);
+  }
+  if (op->step) {
+    stream << ", ";
+    PrintExpr_(*op->step, stream);
   }
   stream << "):\n";
   int for_scope = BeginScope();
@@ -559,8 +567,24 @@ void CodeGenTileLangPY::VisitStmt_(const SeqStmtNode *op) {
   }
 }
 
+void CodeGenTileLangPY::VisitStmt_(const ReturnNode *op) {
+  PrintIndent();
+  stream << "return " << RemoveOutermostParentheses(PrintExpr_(op->value))
+         << "\n";
+}
+
+void CodeGenTileLangPY::VisitStmt_(const BreakNode *) {
+  PrintIndent();
+  stream << "break\n";
+}
+
+void CodeGenTileLangPY::VisitStmt_(const ContinueNode *) {
+  PrintIndent();
+  stream << "continue\n";
+}
+
 void CodeGenTileLangPY::VisitStmt_(const EvaluateNode *op) {
-  if (is_const_int(op->value))
+  if (op->value.as<IntImmNode>())
     return;
 
   std::string vid = PrintExpr_(op->value);
@@ -587,7 +611,7 @@ void CodeGenTileLangPY::VisitStmt_(const AssertStmtNode *op) {
 }
 
 std::string CodeGenTileLangPY::CastFromTo_(const std::string &value,
-                                           DataType from, DataType target) {
+                                           PrimType from, PrimType target) {
   if (from == target)
     return value;
   std::ostringstream os;
@@ -597,7 +621,7 @@ std::string CodeGenTileLangPY::CastFromTo_(const std::string &value,
 }
 
 void CodeGenTileLangPY::PrintBinaryExpr_(const std::string &opstr,
-                                         DataType dtype, PrimExpr lhs,
+                                         PrimType dtype, PrimExpr lhs,
                                          PrimExpr rhs,
                                          std::ostream &os) { // NOLINT(*)
   ICHECK_EQ(dtype.lanes(), 1);
@@ -619,7 +643,7 @@ void CodeGenTileLangPY::PrintBinaryExpr_(const std::string &opstr,
 void CodeGenTileLangPY::PrintBinaryIntrinsic_(const CallNode *op,
                                               const char *opstr,
                                               std::ostream &os) { // NOLINT(*)
-  ICHECK_EQ(op->dtype.lanes(), 1);
+  ICHECK_EQ(op->ty.as_or_throw<PrimType>().lanes(), 1);
   ICHECK_EQ(op->args.size(), 2U);
   os << '(';
   PrintExpr_(op->args[0], os);
@@ -629,7 +653,7 @@ void CodeGenTileLangPY::PrintBinaryIntrinsic_(const CallNode *op,
 }
 
 void CodeGenTileLangPY::PrintCallExtern_(Type ret_type, String global_symbol,
-                                         const Array<PrimExpr> &args,
+                                         const Array<Expr> &args,
                                          bool skip_first_arg,
                                          std::ostream &os) { // NOLINT(*)
   os << global_symbol << "(";
@@ -643,12 +667,11 @@ void CodeGenTileLangPY::PrintCallExtern_(Type ret_type, String global_symbol,
 }
 
 // Print a reference expression to a buffer.
-std::string CodeGenTileLangPY::GetBufferRef_(DataType t,
-                                             const BufferNode *buffer,
+std::string CodeGenTileLangPY::GetBufferRef_(PrimType t, const VarNode *buffer,
                                              PrimExpr index) {
-  const VarNode *buffer_var = buffer->data.get();
+  const VarNode *buffer_var = buffer;
   std::string vid = GetVarID(buffer_var);
-  DataType buffer_element_dtype = buffer->dtype;
+  PrimType buffer_element_dtype = buffer->ty.as_or_throw<BufferType>()->dtype;
 
   ICHECK(HandleTypeMatch_(buffer_var, buffer_element_dtype));
   ICHECK_EQ(t, buffer_element_dtype);
@@ -658,17 +681,17 @@ std::string CodeGenTileLangPY::GetBufferRef_(DataType t,
 }
 
 void CodeGenTileLangPY::RegisterHandleType_(const VarNode *buf_var,
-                                            DataType t) {
+                                            PrimType t) {
   auto it = handle_data_type_.find(buf_var);
   if (it == handle_data_type_.end()) {
-    handle_data_type_[buf_var] = t;
+    handle_data_type_.emplace(buf_var, t);
   } else {
     ICHECK(it->second == t) << "conflicting buf var type";
   }
 }
 
 bool CodeGenTileLangPY::HandleTypeMatch_(const VarNode *buf_var,
-                                         DataType t) const {
+                                         PrimType t) const {
   auto it = handle_data_type_.find(buf_var);
   if (it == handle_data_type_.end())
     return false;

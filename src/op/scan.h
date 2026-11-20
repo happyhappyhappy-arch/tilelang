@@ -17,7 +17,7 @@ using namespace ffi;
 /// Node class for cumulative sum operations
 class CumSumOpNode : public TileOperatorNode {
 public:
-  tirx::Buffer src, dst; ///< Source and destination buffers
+  tirx::BufferVar src, dst; ///< Source and destination buffers
   BufferRegion srcRegion_, dstRegion_;
   int dim;      ///< Dimension along which to compute cumulative sum
   bool reverse; ///< Whether to compute in reverse order
@@ -61,15 +61,14 @@ public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(CumSumOp, TileOperator,
                                              CumSumOpNode);
   TVM_DLL
-  CumSumOp(Array<PrimExpr> args,
-           Map<String, ObjectRef> annotations = Map<String, ObjectRef>());
+  CumSumOp(Array<Expr> args, Map<String, Any> annotations = Map<String, Any>());
   static const Op &Get();
 };
 
 /// Node class for cumulative maximum operations
 class CumMaxOpNode : public TileOperatorNode {
 public:
-  tirx::Buffer src, dst; ///< Source and destination buffers
+  tirx::BufferVar src, dst; ///< Source and destination buffers
   BufferRegion srcRegion_, dstRegion_;
   int dim;      ///< Dimension along which to compute cumulative maximum
   bool reverse; ///< Whether to compute in reverse order
@@ -113,8 +112,7 @@ public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(CumMaxOp, TileOperator,
                                              CumMaxOpNode);
   TVM_DLL
-  CumMaxOp(Array<PrimExpr> args,
-           Map<String, ObjectRef> annotations = Map<String, ObjectRef>());
+  CumMaxOp(Array<Expr> args, Map<String, Any> annotations = Map<String, Any>());
   static const Op &Get();
 };
 

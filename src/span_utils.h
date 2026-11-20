@@ -12,9 +12,9 @@
 #ifndef TVM_TL_SPAN_UTILS_H_
 #define TVM_TL_SPAN_UTILS_H_
 
+#include <tvm/ir/prim/expr.h>
 #include <tvm/ir/source_map.h>
 #include <tvm/tirx/buffer.h>
-#include <tvm/tirx/expr.h>
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/stmt.h>
 

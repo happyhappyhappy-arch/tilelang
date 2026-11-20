@@ -148,7 +148,7 @@ private:
   void VisitStmtImpl_(const Stmt &n) {
     if (const auto *attr = n.as<AttrStmtNode>();
         attr && attr->attr_key == tirx::attr::pragma_import_c) {
-      const auto *source = attr->value.as<StringImmNode>();
+      const auto *source = attr->value.as<prim::StringImmNode>();
       TVM_FFI_ICHECK(source != nullptr)
           << "pragma_import_c expects a string-valued source";
       // The second newline survives a trailing backslash-newline splice.

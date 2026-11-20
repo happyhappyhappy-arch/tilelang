@@ -23,9 +23,8 @@ namespace tl_config {
  */
 inline bool ReducerPlanVerboseEnabled() {
   auto ctxt = tvm::transform::PassContext::Current();
-  return ctxt
-      ->GetConfig("tl.enable_reducer_plan_verbose", ffi::Optional<Bool>())
-      .value_or(Bool(false));
+  return ctxt->GetConfig<bool>("tl.enable_reducer_plan_verbose")
+      .value_or(false);
 }
 
 /*!
@@ -45,9 +44,8 @@ inline std::string LayoutCostModelName() {
  */
 inline bool VectorizePlannerVerboseEnabled() {
   auto ctxt = tvm::transform::PassContext::Current();
-  return ctxt
-      ->GetConfig("tl.enable_vectorize_planner_verbose", ffi::Optional<Bool>())
-      .value_or(Bool(false));
+  return ctxt->GetConfig<bool>("tl.enable_vectorize_planner_verbose")
+      .value_or(false);
 }
 
 /*!
@@ -55,8 +53,7 @@ inline bool VectorizePlannerVerboseEnabled() {
  */
 inline bool Vectorize256Disabled() {
   auto ctxt = tvm::transform::PassContext::Current();
-  return ctxt->GetConfig("tl.disable_vectorize_256", ffi::Optional<Bool>())
-      .value_or(Bool(false));
+  return ctxt->GetConfig<bool>("tl.disable_vectorize_256").value_or(false);
 }
 
 /*!
@@ -75,9 +72,7 @@ inline bool Vectorize256Disabled() {
 inline int EmitLineDirectivesEnabled() {
   auto ctxt = tvm::transform::PassContext::Current();
   return static_cast<int>(
-      ctxt->GetConfig("tl.emit_line_directives", ffi::Optional<Integer>())
-          .value_or(Integer(0))
-          .IntValue());
+      ctxt->GetConfig<int64_t>("tl.emit_line_directives").value_or(0));
 }
 
 } // namespace tl_config

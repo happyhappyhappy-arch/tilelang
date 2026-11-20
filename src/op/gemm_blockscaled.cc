@@ -48,9 +48,8 @@ const GemmBlockScaledImpl *ResolveGemmBlockScaledImpl(const Target &target) {
   return matched;
 }
 
-GemmBlockScaled::GemmBlockScaled(
-    ffi::Array<PrimExpr> args,
-    ffi::Map<ffi::String, ffi::ObjectRef> annotations) {
+GemmBlockScaled::GemmBlockScaled(ffi::Array<Expr> args,
+                                 ffi::Map<ffi::String, ffi::Any> annotations) {
   ICHECK_EQ(args.size(), 16)
       << "tl.tileop.gemm_blockscaled expects the 13 dense GEMM slots followed "
          "by SFA, SFB and k_start, but got "
@@ -104,8 +103,8 @@ ffi::String GemmBlockScaledNode::GetGemmInstructionKey(int block_size,
 
 TIR_REGISTER_TL_TILE_OP(GemmBlockScaled, gemm_blockscaled)
     .set_num_inputs(-1)
-    .set_attr<tirx::TCallEffectKind>("TCallEffectKind",
-                                     Integer(tirx::CallEffectKind::kOpaque));
+    .set_attr<tirx::TCallEffectKind>(
+        "TCallEffectKind", static_cast<int64_t>(tirx::CallEffectKind::kOpaque));
 
 TVM_FFI_STATIC_INIT_BLOCK() { GemmBlockScaledNode::RegisterReflection(); }
 

@@ -4,8 +4,8 @@
  */
 
 #include "transpose.h"
+#include "support/cast.h"
 #include "support/check.h"
-#include <tvm/ir/cast.h>
 
 #include <dlpack/dlpack.h>
 #include <tvm/tirx/builtin.h>
@@ -81,7 +81,7 @@ void RegisterTransposeImpl(TransposeImpl impl) {
   TransposeImplRegistry().push_back(impl);
 }
 
-Transpose::Transpose(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
+Transpose::Transpose(Array<Expr> args, Map<String, Any> annotations) {
   ObjectPtr<TransposeNode> node = make_object<TransposeNode>();
   auto src_access = NormalizeToAccessRegion(args[0], kAccessRead);
   auto dst_access = NormalizeToAccessRegion(args[1], kAccessWrite);
@@ -105,7 +105,7 @@ Array<IterVar> TransposeNode::MakeIterVars() const {
   for (size_t i = 0; i < src_range.size(); i++) {
     if (is_one(src_range[i]->extent))
       continue;
-    Var var = Var(std::string{char('i' + idx)}, src_range[i]->extent->dtype);
+    PrimVar var(std::string{char('i' + idx)}, src_range[i]->extent.ty());
     idx++;
     loop_vars.push_back(
         {Range(0, src_range[i]->extent), var, IterVarType::kDataPar});
@@ -144,7 +144,7 @@ Array<PrimExpr> TransposeNode::MakeIndices(const Array<IterVar> &ivs,
     }
     ICHECK(idx == ivs.size())
         << "idx = " << idx << ", ivs.size() = " << ivs.size()
-        << " src name = " << src->name << ", dst name = " << dst->name;
+        << " src name = " << src.name() << ", dst name = " << dst.name();
   }
   return indices;
 }
@@ -158,11 +158,11 @@ PrimExpr TransposeNode::MakePredicate(arith::Analyzer *analyzer,
       << ") must match buffer rank (" << extents.size() << ")";
   for (size_t i = 0; i < indices.size(); i++) {
     PrimExpr cond = indices[i] < extents[i];
-    if (!analyzer->CanProve(cond, arith::ProofStrength::kSymbolicBound)) {
+    if (!(*analyzer)->CanProve(cond, arith::ProofStrength::kSymbolicBound)) {
       cond_list.push_back(cond);
     }
     cond = indices[i] >= 0;
-    if (!analyzer->CanProve(cond, arith::ProofStrength::kSymbolicBound)) {
+    if (!(*analyzer)->CanProve(cond, arith::ProofStrength::kSymbolicBound)) {
       cond_list.push_back(cond);
     }
   }
@@ -170,7 +170,7 @@ PrimExpr TransposeNode::MakePredicate(arith::Analyzer *analyzer,
     return {};
   PrimExpr cond = cond_list[0];
   for (size_t i = 1; i < cond_list.size(); i++)
-    cond = And(cond, cond_list[i]);
+    cond = prim::And(cond, cond_list[i]);
   return cond;
 }
 
@@ -179,7 +179,7 @@ For TransposeNode::MakeSIMTLoop(arith::Analyzer *analyzer) const {
   bool is_scalar = loop_vars.empty();
 
   for (const auto &iv : loop_vars)
-    analyzer->Bind(iv->var, iv->dom);
+    (*analyzer)->Bind(iv->var, iv->dom);
 
   Array<PrimExpr> src_indices = MakeIndices(loop_vars, 0);
   Array<PrimExpr> dst_indices = MakeIndices(loop_vars, 1);
@@ -189,15 +189,15 @@ For TransposeNode::MakeSIMTLoop(arith::Analyzer *analyzer) const {
 
   PrimExpr value = BufferLoad(src, src_indices);
   if (src->dtype != dst->dtype)
-    value = Cast(dst->dtype, value);
+    value = prim::Cast(dst->dtype, value);
   if (src_predicate.defined())
-    value = if_then_else(src_predicate, value, make_zero(dst->dtype));
+    value = if_then_else(src_predicate, value, MakeConst(dst->dtype, 0));
 
   Stmt body = BufferStore(dst, value, dst_indices);
   if (dst_predicate.defined())
     body = IfThenElse(dst_predicate, body);
   if (is_scalar) {
-    return For(Var("i"), 0, 1, ForKind::kSerial, body);
+    return For(PrimVar("i", PrimType::Int(32)), 0, 1, ForKind::kSerial, body);
   }
 
   for (int i = loop_vars.size() - 1; i >= 0; i--) {
@@ -222,7 +222,7 @@ LayoutMap TransposeNode::InferLayout(const LayoutInferArgs &layout_args,
 TIR_REGISTER_TL_TILE_OP(Transpose, transpose)
     .set_num_inputs(2)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_FFI_STATIC_INIT_BLOCK() { TransposeNode::RegisterReflection(); }
 

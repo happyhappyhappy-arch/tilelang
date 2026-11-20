@@ -18,11 +18,22 @@ namespace tl {
 
 using namespace tirx;
 
+// TileLang's registered custom dtype codes (see tilelang.language.dtypes).
+constexpr auto kTileLangTensorFloat32 = static_cast<DLDataTypeCode>(130);
+constexpr auto kTileLangUnpackedFP4 = static_cast<DLDataTypeCode>(131);
+
+inline bool GetBoolImm(const Expr &expr) {
+  auto value = expr.as_or_throw<IntImm>();
+  CHECK(value.ty() == PrimType::Bool(), TypeError)
+      << "Expected a bool immediate, got " << value.ty();
+  return value->value != 0;
+}
+
 /*! \brief Whether a constant has an all-zero bit pattern, excluding -0.0. */
 TVM_DLL bool IsZeroBitPattern(const PrimExpr &expr);
 
-// Maps TVM DataType to CUDA's CUtensorMapDataType enum value.
-TVM_DLL int to_CUtensorMapDataType(DataType dtype);
+// Maps TVM PrimType to CUDA's CUtensorMapDataType enum value.
+TVM_DLL int to_CUtensorMapDataType(PrimType dtype);
 
 // Reverses an array (used for row-major/column-major layout conversion).
 template <typename T> ffi::Array<T> ReverseArray(ffi::Array<T> array) {
@@ -31,32 +42,31 @@ template <typename T> ffi::Array<T> ReverseArray(ffi::Array<T> array) {
 
 // Check if an PrimExpr is a buffer-like (BufferRegion/BufferLoad/tl.region)
 // expression.
-TVM_DLL bool IsBufferLikeExpr(const PrimExpr &expr);
+TVM_DLL bool IsBufferLikeExpr(const Expr &expr);
 
 // Normalize an argument (BufferRegion/BufferLoad/tl.region)
 // to BufferRegion so ops can uniformly consume regions.
 // Note: tvm_access_ptr is no longer supported here.
-TVM_DLL BufferRegion NormalizeToBufferRegion(const PrimExpr &arg);
+TVM_DLL BufferRegion NormalizeToBufferRegion(const Expr &arg);
 
 // Normalize an argument to BufferRegion together with an access mask.
 // If the argument is a tl.region(...) bridge, preserve its encoded mask;
 // otherwise fall back to the provided default mask.
 TVM_DLL AccessRegion NormalizeToAccessRegion(
-    const PrimExpr &arg, int default_access_mask = kAccessReadWrite);
+    const Expr &arg, int default_access_mask = kAccessReadWrite);
 
 // Build a tvm_access_ptr(handle) from a BufferRegion.
 // - If `require_2d` is true, checks buffer ndim >= 2.
 // - For 1D regions (when allowed), offset=min, extent=extent.
 // - For ndim >= 2, offset sums all but last two dims using row-major strides,
 //   extent is product of the last two extents.
-TVM_DLL PrimExpr MakeAccessPtrFromRegion(const BufferRegion &region,
-                                         int rw_mask, bool require_2d = false);
+TVM_DLL Expr MakeAccessPtrFromRegion(const BufferRegion &region, int rw_mask,
+                                     bool require_2d = false);
 
 // Build a tvm_access_ptr(handle) from a BufferLoad.
-TVM_DLL PrimExpr MakeAccessPtrFromBufferLoad(const BufferLoad &load,
-                                             int rw_mask);
+TVM_DLL Expr MakeAccessPtrFromBufferLoad(const TensorLoad &load, int rw_mask);
 
-inline bool IsFragmentBuffer(const Buffer &buffer) {
+inline bool IsFragmentBuffer(const BufferVar &buffer) {
   return buffer.defined() && buffer.scope() == "local.fragment";
 }
 
@@ -66,7 +76,7 @@ inline bool IsFragmentBuffer(const Buffer &buffer) {
 // This is useful when we infer a 2D swizzle layout from the trailing matrix
 // dimensions of a higher-rank buffer (e.g. batched GEMM shared-memory buffers).
 inline Layout ExpandLayoutToMatchBuffer(const Layout &layout,
-                                        const Buffer &buffer) {
+                                        const BufferVar &buffer) {
   if (!layout.defined() || !buffer.defined()) {
     return layout;
   }
@@ -84,7 +94,7 @@ inline Layout ExpandLayoutToMatchBuffer(const Layout &layout,
   return layout->Expand(leading_shape);
 }
 
-inline bool IsSharedBuffer(const Buffer &buffer, bool allow_dynamic = true) {
+inline bool IsSharedBuffer(const BufferVar &buffer, bool allow_dynamic = true) {
   if (!buffer.defined()) {
     return false;
   }
@@ -94,14 +104,14 @@ inline bool IsSharedBuffer(const Buffer &buffer, bool allow_dynamic = true) {
   return buffer.scope() == "shared";
 }
 
-inline bool IsTmemBuffer(const Buffer &buffer) {
+inline bool IsTmemBuffer(const BufferVar &buffer) {
   if (!buffer.defined()) {
     return false;
   }
   return buffer.scope() == "shared.tmem";
 }
 
-inline bool IsGlobalBuffer(const Buffer &buffer) {
+inline bool IsGlobalBuffer(const BufferVar &buffer) {
   return buffer.defined() && buffer.scope() == "global";
 }
 
@@ -109,7 +119,7 @@ inline bool IsValidCPAsyncTransferBytes(int bytes) {
   return bytes == 4 || bytes == 8 || bytes == 16;
 }
 
-inline bool IsLocalBuffer(const Buffer &buffer, bool allow_var = false) {
+inline bool IsLocalBuffer(const BufferVar &buffer, bool allow_var = false) {
   if (!buffer.defined()) {
     return false;
   }
@@ -119,21 +129,21 @@ inline bool IsLocalBuffer(const Buffer &buffer, bool allow_var = false) {
   return buffer.scope() == "local";
 }
 
-inline bool IsLocalVarBuffer(const Buffer &buffer) {
+inline bool IsLocalVarBuffer(const BufferVar &buffer) {
   return buffer.defined() && buffer.scope() == "local.var";
 }
 
 // True when global packed FP4 is copied into f8f6f4/mxf8f6f4 unpacked FP4 SMEM.
-inline bool IsFP4PackedToUnpackedStorageCopy(DataType global_dtype,
-                                             DataType shared_dtype) {
-  return global_dtype.is_float4_e2m1fn() &&
-         shared_dtype.is_float4_e2m1_unpacked();
+inline bool IsFP4PackedToUnpackedStorageCopy(PrimType global_dtype,
+                                             PrimType shared_dtype) {
+  return global_dtype.MatchesElementType(kDLFloat4_e2m1fn, 4) &&
+         shared_dtype.MatchesElementType(kTileLangUnpackedFP4, 8);
 }
 
-inline bool IsValidTMALoadDtypePair(DataType global_dtype,
-                                    DataType shared_dtype) {
-  if (global_dtype.is_float4_e2m1_unpacked() ||
-      shared_dtype.is_float4_e2m1_unpacked()) {
+inline bool IsValidTMALoadDtypePair(PrimType global_dtype,
+                                    PrimType shared_dtype) {
+  if (global_dtype.MatchesElementType(kTileLangUnpackedFP4, 8) ||
+      shared_dtype.MatchesElementType(kTileLangUnpackedFP4, 8)) {
     return IsFP4PackedToUnpackedStorageCopy(global_dtype, shared_dtype);
   }
   if (global_dtype == shared_dtype) {
@@ -142,14 +152,14 @@ inline bool IsValidTMALoadDtypePair(DataType global_dtype,
   return false;
 }
 
-inline bool IsValidTMAStoreDtypePair(DataType global_dtype,
-                                     DataType shared_dtype) {
+inline bool IsValidTMAStoreDtypePair(PrimType global_dtype,
+                                     PrimType shared_dtype) {
   return global_dtype == shared_dtype &&
-         !shared_dtype.is_float4_e2m1_unpacked();
+         !shared_dtype.MatchesElementType(kTileLangUnpackedFP4, 8);
 }
 
-inline bool IsValidTMADtypePair(bool is_load, DataType global_dtype,
-                                DataType shared_dtype) {
+inline bool IsValidTMADtypePair(bool is_load, PrimType global_dtype,
+                                PrimType shared_dtype) {
   if (is_load) {
     return IsValidTMALoadDtypePair(global_dtype, shared_dtype);
   }
@@ -157,14 +167,14 @@ inline bool IsValidTMADtypePair(bool is_load, DataType global_dtype,
 }
 
 // Valid dtype pairs for TMA global->shared copies.
-inline bool IsValidTMACopyDtypePair(DataType global_dtype,
-                                    DataType shared_dtype) {
+inline bool IsValidTMACopyDtypePair(PrimType global_dtype,
+                                    PrimType shared_dtype) {
   return IsValidTMALoadDtypePair(global_dtype, shared_dtype);
 }
 
 // True only for the supported TMA load transition from packed global FP4 to
 // unpacked shared FP4. The reverse store direction is not a valid TMA path.
-inline bool IsFP4UnpackLoad(const Buffer &src, const Buffer &dst) {
+inline bool IsFP4UnpackLoad(const BufferVar &src, const BufferVar &dst) {
   return IsGlobalBuffer(src) && IsSharedBuffer(dst) &&
          IsFP4PackedToUnpackedStorageCopy(src->dtype, dst->dtype);
 }

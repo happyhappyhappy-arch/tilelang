@@ -7,7 +7,6 @@
 #define TVM_TL_OP_FILL_H_
 
 #include "operator.h"
-#include "parallel.h"
 #include "support/check.h"
 
 namespace tvm {
@@ -18,7 +17,7 @@ using namespace tirx;
 /// Node class for fill operations
 class FillNode : public TileOperatorNode {
 public:
-  tirx::Buffer dst;         ///< Destination buffer to fill
+  tirx::BufferVar dst;      ///< Destination buffer to fill
   PrimExpr value;           ///< Value to fill with
   ffi::Array<Range> region; ///< Region to fill within the buffer
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tl.Fill", FillNode, TileOperatorNode);
@@ -59,9 +58,9 @@ void RegisterFillImpl(FillImpl impl);
 class Fill : public TileOperator {
 public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Fill, TileOperator, FillNode);
-  TVM_DLL Fill(ffi::Array<PrimExpr> args,
-               ffi::Map<ffi::String, ffi::ObjectRef> annotations =
-                   ffi::Map<ffi::String, ffi::ObjectRef>());
+  TVM_DLL Fill(ffi::Array<Expr> args,
+               ffi::Map<ffi::String, ffi::Any> annotations =
+                   ffi::Map<ffi::String, ffi::Any>());
   static const Op &Get();
 };
 

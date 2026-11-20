@@ -15,22 +15,22 @@ using namespace tirx;
 TIR_DEFINE_TL_BUILTIN(cooperative_tensor_fill)
     .set_num_inputs(5)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TIR_DEFINE_TL_BUILTIN(cooperative_tensor_load)
     .set_num_inputs(11)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TIR_DEFINE_TL_BUILTIN(cooperative_tensor_store)
     .set_num_inputs(11)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TIR_DEFINE_TL_BUILTIN(cooperative_tensor_multiply_accumulate)
     .set_num_inputs(13)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 } // namespace tl
 } // namespace tvm

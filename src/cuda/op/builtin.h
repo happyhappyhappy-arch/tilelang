@@ -108,7 +108,7 @@ TVM_DLL const Op &min2_nan();
 /*!
  * \brief Return the sentinel dtype used for CUDA tensor-map parameters.
  */
-DataType CuTensorMapType();
+PrimType CuTensorMapType();
 
 /*!
  * \brief tvm intrinsics for TMADescriptor creation for tiled load

@@ -18,7 +18,7 @@ using namespace ffi;
 /// Node class for transpose operations over the final two axes.
 class TransposeNode : public TileOperatorNode {
 public:
-  Buffer src, dst;
+  BufferVar src, dst;
   Array<Range> src_range, dst_range;
 
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tl.Transpose", TransposeNode,
@@ -74,8 +74,8 @@ public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Transpose, TileOperator,
                                              TransposeNode);
   TVM_DLL
-  Transpose(Array<PrimExpr> args,
-            Map<String, ObjectRef> annotations = Map<String, ObjectRef>());
+  Transpose(Array<Expr> args,
+            Map<String, Any> annotations = Map<String, Any>());
   static const Op &Get();
 };
 

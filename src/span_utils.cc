@@ -24,14 +24,14 @@ Span GetStmtSpan(const Stmt &stmt) {
   return stmt.defined() ? stmt->span : Span();
 }
 
-void SetBufferSpan(Buffer buffer, Span span) {
+void SetBufferSpan(BufferVar buffer, Span span) {
   if (buffer.defined()) {
     buffer.get()->span = std::move(span);
   }
 }
 
-Span GetBufferSpan(const Buffer &buffer) {
-  return buffer.defined() ? buffer->span : Span();
+Span GetBufferSpan(const BufferVar &buffer) {
+  return buffer.defined() ? buffer.span() : Span();
 }
 
 void SetPrimFuncSpan(PrimFunc func, Span span) {
@@ -50,13 +50,17 @@ void StampSubtreeSpans(const Stmt &stmt, const Span &span) {
   if (!stmt.defined() || !span.defined()) {
     return;
   }
-  PostOrderVisit(stmt, [&span](const ObjectRef &obj) {
-    if (const auto *node = obj.as<StmtNode>()) {
-      if (!node->span.defined()) {
-        const_cast<StmtNode *>(node)->span = span;
-      }
+  struct SpanStamper : StmtVisitor {
+    explicit SpanStamper(const Span &span) : span(span) {}
+    void VisitStmt(const Stmt &stmt) final {
+      if (!stmt->span.defined())
+        stmt.get()->span = span;
+      StmtVisitor::VisitStmt(stmt);
     }
-  });
+    const Span &span;
+  };
+  SpanStamper stamper(span);
+  stamper(stmt);
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {

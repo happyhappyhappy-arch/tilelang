@@ -9,9 +9,9 @@
 #include "../transform/loop_partition.h"
 #include "../transform/loop_vectorize.h"
 #include "span_utils.h"
+#include "support/cast.h"
 #include "support/check.h"
 #include "utils.h"
-#include <tvm/ir/cast.h>
 #include <tvm/runtime/logging.h>
 
 #include "builtin.h"
@@ -48,22 +48,23 @@ Stmt LowerNormalCopy(const CopyNode &op, const LowerArgs &lower_args,
       // uses by identity (the real threadIdx.x Var on GPU; none when it is a
       // constant, e.g. 0 on CPU).
       std::unordered_set<const VarNode *> thread_index_vars;
-      tirx::UsesVar(lower_args.thread_index, [&](const VarNode *v) {
-        thread_index_vars.insert(v);
-        return false;
-      });
+      for (const auto &var : tirx::UndefinedVars(lower_args.thread_index)) {
+        thread_index_vars.insert(var.get());
+      }
       bool dst_depends_on_thread = false;
       for (const auto &range : op.dst_range) {
-        if (tirx::UsesVar(range->min, [&](const VarNode *v) {
-              return thread_index_vars.count(v) != 0;
-            })) {
-          dst_depends_on_thread = true;
-          break;
+        for (const auto &var : tirx::UndefinedVars(range->min)) {
+          if (thread_index_vars.count(var.get())) {
+            dst_depends_on_thread = true;
+            break;
+          }
         }
+        if (dst_depends_on_thread)
+          break;
       }
       if (!dst_depends_on_thread) {
-        DLOG(WARNING) << "Copy from local buffer `" << op.src->name << "` to "
-                      << op.dst.scope() << " buffer `" << op.dst->name
+        DLOG(WARNING) << "Copy from local buffer `" << op.src.name() << "` to "
+                      << op.dst.scope() << " buffer `" << op.dst.name()
                       << "` may cause conflicted write.";
       }
     }
@@ -100,7 +101,7 @@ TileOperator ApplyCopyBlockAnnotations(TileOperator tile_op,
   auto *node = const_cast<CopyNode *>(copy.operator->());
   ICHECK(node != nullptr);
 
-  node->src_oob_safe_value = PrimExpr();
+  node->src_oob_safe_value = std::nullopt;
   auto safe_value_map_obj = block_annotations.Get(attr::kSafeValueMap);
   if (!safe_value_map_obj) {
     return copy;
@@ -108,7 +109,7 @@ TileOperator ApplyCopyBlockAnnotations(TileOperator tile_op,
 
   auto safe_value_map =
       Downcast<Map<Var, PrimExpr>>(safe_value_map_obj.value());
-  auto it = safe_value_map.find(node->src->data);
+  auto it = safe_value_map.find(node->src.var());
   if (it != safe_value_map.end()) {
     node->src_oob_safe_value = (*it).second;
   }
@@ -180,8 +181,8 @@ bool MatchAnyIm2ColTarget(Target /*target*/) { return true; }
 
 Stmt LowerIm2ColSIMT(const Im2ColOpNode &op, const LowerArgs &lower_args,
                      arith::Analyzer *analyzer) {
-  const Buffer &src = op.src_;
-  const Buffer &dst = op.dst_;
+  const BufferVar &src = op.src_;
+  const BufferVar &dst = op.dst_;
   const BufferRegion &dst_region = op.dstRegion_;
 
   ICHECK(src->shape.size() == 4);
@@ -192,40 +193,42 @@ Stmt LowerIm2ColSIMT(const Im2ColOpNode &op, const LowerArgs &lower_args,
 
   PrimExpr block_m = dst_region->region[ndim - 2]->extent;
   PrimExpr block_k = dst_region->region[ndim - 1]->extent;
-  Var i("i", block_m.dtype());
-  Var j("j", block_k.dtype());
-  analyzer->Bind(i, Range::FromMinExtent(make_zero(i.dtype()), block_m));
-  analyzer->Bind(j, Range::FromMinExtent(make_zero(j.dtype()), block_k));
+  PrimVar i("i", block_m.ty());
+  PrimVar j("j", block_k.ty());
+  (*analyzer)->Bind(i, Range::FromMinExtent(MakeConst(i.ty(), 0), block_m));
+  (*analyzer)->Bind(j, Range::FromMinExtent(MakeConst(j.ty(), 0), block_k));
 
   PrimExpr h_dim = src->shape[1];
   PrimExpr w_dim = src->shape[2];
   PrimExpr c_dim = src->shape[3];
-  PrimExpr out_h =
-      FloorDiv(h_dim + 2 * op.padding_ - (op.kernel_ - 1) * op.dilation_ - 1,
-               op.stride_) +
-      1;
-  PrimExpr out_w =
-      FloorDiv(w_dim + 2 * op.padding_ - (op.kernel_ - 1) * op.dilation_ - 1,
-               op.stride_) +
-      1;
+  PrimExpr out_h = prim::FloorDiv(h_dim + 2 * op.padding_ -
+                                      (op.kernel_ - 1) * op.dilation_ - 1,
+                                  op.stride_) +
+                   1;
+  PrimExpr out_w = prim::FloorDiv(w_dim + 2 * op.padding_ -
+                                      (op.kernel_ - 1) * op.dilation_ - 1,
+                                  op.stride_) +
+                   1;
   PrimExpr out_hw = out_h * out_w;
 
   PrimExpr k = op.c_step_ * block_k + j;
   PrimExpr m = op.nhw_step_ * block_m + i;
-  PrimExpr access_h = FloorDiv(FloorMod(m, out_hw), out_w) * op.stride_ +
-                      FloorDiv(k, op.kernel_ * c_dim) * op.dilation_ -
-                      op.padding_;
-  PrimExpr access_w = FloorMod(m, out_w) * op.stride_ +
-                      FloorMod(FloorDiv(k, c_dim), op.kernel_) * op.dilation_ -
-                      op.padding_;
+  PrimExpr access_h =
+      prim::FloorDiv(prim::FloorMod(m, out_hw), out_w) * op.stride_ +
+      prim::FloorDiv(k, op.kernel_ * c_dim) * op.dilation_ - op.padding_;
+  PrimExpr access_w =
+      prim::FloorMod(m, out_w) * op.stride_ +
+      prim::FloorMod(prim::FloorDiv(k, c_dim), op.kernel_) * op.dilation_ -
+      op.padding_;
 
-  PrimExpr in_bound = And(And(access_h >= make_zero(access_h.dtype()),
-                              access_w >= make_zero(access_w.dtype())),
-                          And(access_h < h_dim, access_w < w_dim));
+  PrimExpr in_bound =
+      prim::And(prim::And(access_h >= MakeConst(access_h.ty(), 0),
+                          access_w >= MakeConst(access_w.ty(), 0)),
+                prim::And(access_h < h_dim, access_w < w_dim));
 
-  PrimExpr value = BufferLoad(
-      src, {FloorDiv(m, out_hw), access_h, access_w, FloorMod(k, c_dim)});
-  value = if_then_else(in_bound, value, make_zero(dst->dtype));
+  PrimExpr value = BufferLoad(src, {prim::FloorDiv(m, out_hw), access_h,
+                                    access_w, prim::FloorMod(k, c_dim)});
+  value = if_then_else(in_bound, value, MakeConst(dst->dtype, 0));
 
   Array<PrimExpr> dst_indices;
   dst_indices.reserve(ndim);
@@ -241,8 +244,8 @@ Stmt LowerIm2ColSIMT(const Im2ColOpNode &op, const LowerArgs &lower_args,
   }
 
   Stmt body = BufferStore(dst, value, dst_indices);
-  body = For(j, make_zero(j.dtype()), block_k, ForKind::kParallel, body);
-  body = For(i, make_zero(i.dtype()), block_m, ForKind::kParallel, body);
+  body = For(j, MakeConst(j.ty(), 0), block_k, ForKind::kParallel, body);
+  body = For(i, MakeConst(i.ty(), 0), block_m, ForKind::kParallel, body);
 
   auto fused_loop = Downcast<For>(ParallelLoopFuser::Fuse(Downcast<For>(body)));
   auto par_op = ParallelOp(fused_loop);
@@ -296,7 +299,7 @@ void RegisterIm2ColImpl(Im2ColImpl impl) {
 // Constructs a Copy operator node from call arguments and annotations.
 // args[0]: source region, args[1]: destination region
 // annotations: Map containing common SIMT hints and backend-specific metadata.
-Copy::Copy(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
+Copy::Copy(Array<Expr> args, Map<String, Any> annotations) {
   ObjectPtr<CopyNode> node = make_object<CopyNode>();
   auto src_access = NormalizeToAccessRegion(args[0], kAccessRead);
   auto dst_access = NormalizeToAccessRegion(args[1], kAccessWrite);
@@ -308,9 +311,9 @@ Copy::Copy(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
   // Copy annotations from the Call node
   node->annotations = annotations;
   if (auto dst_block = node->annotations.Get("dst_block")) {
-    if (auto int_imm = dst_block->as<IntImmNode>()) {
-      if (int_imm->value != -1) {
-        node->dst_block = Integer(int_imm->value);
+    if (auto int_imm = dst_block->as<IntImm>()) {
+      if ((*int_imm)->value != -1) {
+        node->dst_block = *int_imm;
       }
     } else {
       node->dst_block = Downcast<PrimExpr>(dst_block.value());
@@ -333,7 +336,7 @@ Array<IterVar> CopyNode::MakeIterVars() const {
   // Choose the range set from the lowest-level memory scope between src and
   // dst. Scope levels: global < shared/shared.dyn/shared.tmem < local.fragment
   // (fragment)
-  auto scope_level = [](const Buffer &b) -> int {
+  auto scope_level = [](const BufferVar &b) -> int {
     String s = b.scope();
     if (s == "local.fragment" || s == "local")
       return 2;
@@ -372,7 +375,7 @@ Array<IterVar> CopyNode::MakeIterVars() const {
       PrimExpr base_ext = base_ranges[base_dim]->extent;
       PrimExpr src_ext = src_range[src_dim]->extent;
       // Only fail if base extent is provably smaller than src extent
-      if (analyzer.CanProve(base_ext < src_ext)) {
+      if (analyzer->CanProve(base_ext < src_ext)) {
         std::ostringstream oss;
         oss << "Selected loop range is smaller than original src range at "
                "matched non-1 dimension: "
@@ -381,16 +384,18 @@ Array<IterVar> CopyNode::MakeIterVars() const {
             << ", min=" << base_ranges[base_dim]->min
             << ", base_dim=" << base_dim << ") < src(extent=" << src_ext
             << ", min=" << src_range[src_dim]->min << ", src_dim=" << src_dim
-            << ", scope=" << src.scope() << ") for src=" << src->name
-            << ", dst=" << dst->name << "\n";
-        oss << "src buffer: " << src->name << ", scope=" << src.scope() << "\n";
-        oss << "dst buffer: " << dst->name << ", scope=" << dst.scope() << "\n";
+            << ", scope=" << src.scope() << ") for src=" << src.name()
+            << ", dst=" << dst.name() << "\n";
+        oss << "src buffer: " << src.name() << ", scope=" << src.scope()
+            << "\n";
+        oss << "dst buffer: " << dst.name() << ", scope=" << dst.scope()
+            << "\n";
         oss << "base_ranges[" << base_dim
             << "]: min=" << base_ranges[base_dim]->min
             << ", extent=" << base_ext << "\n";
         oss << "src_ranges[" << src_dim << "]: min=" << src_range[src_dim]->min
             << ", extent=" << src_ext << "\n";
-        LOG(FATAL) << oss.str() << SpanHintSuffix({dst->span, src->span});
+        LOG(FATAL) << oss.str() << SpanHintSuffix({dst.span(), src.span()});
       }
       ++base_dim;
       ++src_dim;
@@ -415,7 +420,7 @@ Array<IterVar> CopyNode::MakeIterVars() const {
   for (size_t i = 0; i < base_ranges.size(); i++) {
     if (is_one(base_ranges[i]->extent))
       continue;
-    Var var = Var(std::string{char('i' + idx)}, base_ranges[i]->extent->dtype);
+    PrimVar var(std::string{char('i' + idx)}, base_ranges[i]->extent.ty());
     idx++;
     loop_vars.push_back(
         {Range(0, base_ranges[i]->extent), var, IterVarType::kDataPar});
@@ -440,7 +445,7 @@ Array<PrimExpr> CopyNode::MakeIndices(const Array<IterVar> &ivs,
   }
   ICHECK(idx == ivs.size())
       << "idx = " << idx << ", ivs.size() = " << ivs.size()
-      << "src name = " << src->name << ", dst name = " << dst->name;
+      << "src name = " << src.name() << ", dst name = " << dst.name();
   return indices;
 }
 
@@ -458,11 +463,11 @@ PrimExpr CopyNode::MakePredicate(arith::Analyzer *analyzer,
     if (is_one(ranges[i]->extent))
       continue;
     PrimExpr cond = ranges[i]->min + ivs[idx]->var < extents[i];
-    if (!analyzer->CanProve(cond, arith::ProofStrength::kSymbolicBound)) {
+    if (!(*analyzer)->CanProve(cond, arith::ProofStrength::kSymbolicBound)) {
       cond_list.push_back(cond);
     }
     cond = ranges[i]->min + ivs[idx]->var >= 0;
-    if (!analyzer->CanProve(cond, arith::ProofStrength::kSymbolicBound)) {
+    if (!(*analyzer)->CanProve(cond, arith::ProofStrength::kSymbolicBound)) {
       cond_list.push_back(cond);
     }
     idx++;
@@ -472,7 +477,7 @@ PrimExpr CopyNode::MakePredicate(arith::Analyzer *analyzer,
   else {
     PrimExpr cond = cond_list[0];
     for (size_t i = 1; i < cond_list.size(); i++)
-      cond = And(cond, cond_list[i]);
+      cond = prim::And(cond, cond_list[i]);
     return cond;
   }
 }
@@ -482,24 +487,24 @@ For CopyNode::MakeSIMTLoop(arith::Analyzer *analyzer) const {
   if (IsFP4UnpackLoad(src, dst)) {
     LOG(FATAL) << "SIMT copy from packed global float4_e2m1fn to unpacked "
                << "shared float4_e2m1_unpacked is not supported; use "
-               << "T.tma_copy() for FP4 unpack loads (src=" << src->name
-               << ", dst=" << dst->name << ").";
+               << "T.tma_copy() for FP4 unpack loads (src=" << src.name()
+               << ", dst=" << dst.name() << ").";
   }
 
   Array<IterVar> loop_vars = MakeIterVars();
   bool is_scalar = loop_vars.empty();
 
   for (const auto &iv : loop_vars)
-    analyzer->Bind(iv->var, iv->dom);
+    (*analyzer)->Bind(iv->var, iv->dom);
   ICHECK(loop_vars.size() <= src_range.size())
       << "loop_vars.size() = " << loop_vars.size()
-      << ", src_range.size() = " << src_range.size() << ", src = " << src->name
-      << ", dst = " << dst->name;
+      << ", src_range.size() = " << src_range.size() << ", src = " << src.name()
+      << ", dst = " << dst.name();
 
   ICHECK(loop_vars.size() <= dst_range.size())
       << "loop_vars.size() = " << loop_vars.size()
-      << ", dst_range.size() = " << dst_range.size() << ", src = " << src->name
-      << ", dst = " << dst->name;
+      << ", dst_range.size() = " << dst_range.size() << ", src = " << src.name()
+      << ", dst = " << dst.name();
 
   Array<PrimExpr> src_indices = MakeIndices(loop_vars, 0);
   Array<PrimExpr> dst_indices = MakeIndices(loop_vars, 1);
@@ -509,26 +514,27 @@ For CopyNode::MakeSIMTLoop(arith::Analyzer *analyzer) const {
 
   PrimExpr value = BufferLoad(src, src_indices);
   if (src->dtype != dst->dtype)
-    value = Cast(dst->dtype, value);
+    value = prim::Cast(dst->dtype, value);
   if (src_predicate.defined()) {
-    PrimExpr safe_value = make_zero(src->dtype);
+    PrimExpr safe_value = MakeConst(src->dtype, 0);
     if (src_oob_safe_value.defined()) {
       safe_value = src_oob_safe_value.value();
     }
-    if (safe_value.dtype() != dst->dtype)
-      safe_value = Cast(dst->dtype, safe_value);
-    value = if_then_else(src_predicate, value, analyzer->Simplify(safe_value));
+    if (safe_value.ty() != dst->dtype)
+      safe_value = prim::Cast(dst->dtype, safe_value);
+    value =
+        if_then_else(src_predicate, value, (*analyzer)->Simplify(safe_value));
   }
 
   Stmt body = BufferStore(dst, value, dst_indices);
   if (dst_predicate.defined())
     body = IfThenElse(dst_predicate, body);
   if (is_scalar) {
-    return For(Var("i"), 0, 1, ForKind::kSerial, body);
+    return For(PrimVar("i", PrimType::Int(32)), 0, 1, ForKind::kSerial, body);
   }
 
   for (int i = loop_vars.size() - 1; i >= 0; i--) {
-    Map<String, ObjectRef> loop_annotations;
+    Map<String, Any> loop_annotations;
 
     // Only attach the parallel related annotations on the outermost loop (i ==
     // 0)
@@ -573,7 +579,7 @@ Stmt CopyNode::Lower(const LowerArgs &lower_args,
 // Constructs an Im2ColOp node from call arguments.
 // args: src, dst, nhw_step, c_step, kernel, stride, dilation, padding.
 // The CUDA-only eviction_policy hint rides in the annotations map.
-Im2ColOp::Im2ColOp(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
+Im2ColOp::Im2ColOp(Array<Expr> args, Map<String, Any> annotations) {
   ObjectPtr<Im2ColOpNode> node = make_object<Im2ColOpNode>();
   auto src_access = NormalizeToAccessRegion(args[0], kAccessRead);
   auto dst_access = NormalizeToAccessRegion(args[1], kAccessWrite);
@@ -582,16 +588,16 @@ Im2ColOp::Im2ColOp(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
   node->SetAccessRegions({src_access, dst_access});
   node->src_ = node->srcRegion_->buffer;
   node->dst_ = node->dstRegion_->buffer;
-  node->nhw_step_ = args[2];
-  node->c_step_ = args[3];
+  node->nhw_step_ = args[2].as_or_throw<PrimExpr>();
+  node->c_step_ = args[3].as_or_throw<PrimExpr>();
   node->kernel_ = args[4].as<IntImm>().value()->value;
   node->stride_ = args[5].as<IntImm>().value()->value;
   node->dilation_ = args[6].as<IntImm>().value()->value;
   node->padding_ = args[7].as<IntImm>().value()->value;
   if (auto val = annotations.Get("eviction_policy")) {
-    const auto *int_val = val->as<IntImmNode>();
+    auto int_val = val->as<IntImm>();
     ICHECK(int_val) << "eviction_policy annotation must be IntImmNode";
-    node->eviction_policy_ = int_val->value;
+    node->eviction_policy_ = (*int_val)->value;
   }
   node->annotations_ = annotations;
   data_ = std::move(node);
@@ -617,41 +623,41 @@ TIR_REGISTER_TL_TILE_OP(Copy, copy)
                                             ApplyCopyBlockAnnotations)
     .set_num_inputs(2)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_REGISTER_OP("tl.tileop.async_copy")
     .set_attr<TScriptPrinterName>("TScriptPrinterName", "async_copy")
     .set_attr<OpBuilderFunc>("TLOpBuilder",
-                             [](Array<PrimExpr> args,
-                                Map<String, ObjectRef> annotations) {
-                               Map<String, ObjectRef> ann = annotations;
+                             [](Array<Expr> args,
+                                Map<String, Any> annotations) {
+                               Map<String, Any> ann = annotations;
                                ann.Set("is_async_copy",
-                                       IntImm(DataType::Int(32), 1));
+                                       IntImm(PrimType::Int(32), 1));
                                return Copy(args, ann);
                              })
     .set_attr<OpBlockAnnotationHandlerFunc>(kTLOpBlockAnnotationHandler,
                                             ApplyCopyBlockAnnotations)
     .set_num_inputs(2)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 // Register the tma_copy operation — same as copy but forces TMA path
 // and emits only expect_tx + tma_load (no wait).
 TVM_REGISTER_OP("tl.tileop.tma_copy")
     .set_attr<TScriptPrinterName>("TScriptPrinterName", "tma_copy")
     .set_attr<OpBuilderFunc>("TLOpBuilder",
-                             [](Array<PrimExpr> args,
-                                Map<String, ObjectRef> annotations) {
-                               Map<String, ObjectRef> ann = annotations;
+                             [](Array<Expr> args,
+                                Map<String, Any> annotations) {
+                               Map<String, Any> ann = annotations;
                                ann.Set("is_tma_copy",
-                                       IntImm(DataType::Int(32), 1));
+                                       IntImm(PrimType::Int(32), 1));
                                return Copy(args, ann);
                              })
     .set_attr<OpBlockAnnotationHandlerFunc>(kTLOpBlockAnnotationHandler,
                                             ApplyCopyBlockAnnotations)
     .set_num_inputs(2)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 // Layout inference hook - returns empty map (no layout suggestions).
 LayoutMap Im2ColOpNode::InferLayout(const LayoutInferArgs &layout_args,
@@ -668,20 +674,20 @@ LayoutMap Im2ColOpNode::InferLayout(const LayoutInferArgs &layout_args,
 TIR_REGISTER_TL_TILE_OP(Im2ColOp, im2col)
     .set_num_inputs(8)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 // Deprecated compatibility alias. Prefer tl.tileop.im2col; this alias is
 // scheduled for removal in TileLang 0.14.0.
 TVM_REGISTER_OP("tl.tileop.c2d_im2col")
     .set_attr<TScriptPrinterName>("TScriptPrinterName", "c2d_im2col")
     .set_attr<OpBuilderFunc>("TLOpBuilder",
-                             [](Array<PrimExpr> args,
-                                Map<String, ObjectRef> annotations) {
+                             [](Array<Expr> args,
+                                Map<String, Any> annotations) {
                                return Im2ColOp(args, annotations);
                              })
     .set_num_inputs(8)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   CopyNode::RegisterReflection();

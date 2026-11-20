@@ -14,7 +14,7 @@
 
 #include "backend/common/codegen/codegen_c_base.h"
 #include "tvm/target/codegen.h"
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 
 namespace tvm {
 namespace tl {
@@ -46,21 +46,22 @@ public:
   void DefineModuleName();
 
   using tvm::codegen::CodeGenC::PrintType;
-  void PrintType(tvm::DataType t, std::ostream &os) final; // NOLINT(*)
+  void PrintType(const tvm::PrimType &t, std::ostream &os) final; // NOLINT(*)
   void PrintFuncPrefix(std::ostream &os) final;            // NOLINT(*)
 
   // overload visitor functions
-  void VisitExpr_(const tvm::tirx::BroadcastNode *op,
+  void VisitExpr_(const tvm::prim::BroadcastNode *op,
                   std::ostream &os) final; // NOLINT(*)
-  void VisitExpr_(const tvm::tirx::CallNode *op,
+  void VisitExpr_(const tvm::CallNode *op,
                   std::ostream &os) override; // NOLINT(*)
   // overload min and max to use the ternary operator, so we don't rely on the
   // standard library implementations
-  void VisitExpr_(const tvm::tirx::MinNode *op,
+  void VisitExpr_(const tvm::prim::MinNode *op,
                   std::ostream &os) final; // NOLINT(*)
-  void VisitExpr_(const tvm::tirx::MaxNode *op,
+  void VisitExpr_(const tvm::prim::MaxNode *op,
                   std::ostream &os) final; // NOLINT(*)
 
+  void VisitStmt_(const tvm::tirx::ReturnNode *op) final;
   void VisitStmt_(const tvm::tirx::EvaluateNode *op) final; // NOLINT(*)
 
   void VisitStmt_(const tvm::tirx::AssertStmtNode *op) final; // NOLINT(*)
@@ -88,10 +89,10 @@ private:
 
   bool is_in_metal_context = false;
 
-  std::string GetPackedName(const tvm::tirx::CallNode *op);
+  std::string GetPackedName(const tvm::CallNode *op);
   void PrintGetFuncFromBackend(const std::string &func_name,
                                const std::string &packed_func_name);
-  std::string PrintCallPacked(const tvm::tirx::CallNode *op);
+  std::string PrintCallPacked(const tvm::CallNode *op);
   /*!
    * \brief Print ternary conditional operator implementing binary `op`
    * Forces the operands to be in SSA form.

@@ -31,6 +31,8 @@ namespace tl {
 namespace cute {
 
 using namespace tirx;
+using prim::FloorDiv;
+using prim::FloorMod;
 
 namespace {
 
@@ -283,11 +285,11 @@ IntTuple AddLeaf(const IntTuple &a, const IntTuple &b) {
   ICHECK(!IsTuple(a) && !IsTuple(b)) << "Can only add leaves";
   if (IsConst(a) && IsConst(b))
     return IntTuple(AsConst(a) + AsConst(b));
-  std::optional<DataType> dtype;
+  std::optional<PrimType> dtype;
   if (IsPrimExpr(a))
-    dtype = AsPrimExpr(a)->dtype;
+    dtype = AsPrimExpr(a).ty();
   if (IsPrimExpr(b)) {
-    auto dt = AsPrimExpr(b)->dtype;
+    auto dt = AsPrimExpr(b).ty();
     if (dtype.has_value()) {
       ICHECK_EQ(*dtype, dt) << "dtype mismatch: " << *dtype << " vs " << dt
                             << " between operands " << a << " and " << b;
@@ -308,12 +310,12 @@ IntTuple MulLeaf(const IntTuple &a, const IntTuple &b) {
   if (IsConst(a) && IsConst(b)) {
     return IntTuple(AsConst(a) * AsConst(b));
   }
-  std::optional<DataType> dtype;
+  std::optional<PrimType> dtype;
   if (IsPrimExpr(a)) {
-    dtype = AsPrimExpr(a)->dtype;
+    dtype = AsPrimExpr(a).ty();
   }
   if (IsPrimExpr(b)) {
-    auto dt = AsPrimExpr(b)->dtype;
+    auto dt = AsPrimExpr(b).ty();
     if (dtype.has_value()) {
       ICHECK_EQ(*dtype, dt) << "dtype mismatch: " << *dtype << " vs " << dt
                             << " between operands " << a << " and " << b;
@@ -337,7 +339,7 @@ IntTuple DivLeaf(const IntTuple &a, const IntTuple &b) {
     int64_t q = x / y, r = x % y; // round toward -inf (floor)
     return IntTuple(q - ((r != 0) && ((r < 0) != (y < 0)) ? 1 : 0));
   }
-  DataType dt = IsPrimExpr(a) ? AsPrimExpr(a)->dtype : AsPrimExpr(b)->dtype;
+  PrimType dt = IsPrimExpr(a) ? AsPrimExpr(a).ty() : AsPrimExpr(b).ty();
   return IntTuple(FloorDiv(AsConstOrPrimExpr(a, dt), AsConstOrPrimExpr(b, dt)));
 }
 
@@ -349,7 +351,7 @@ IntTuple ModLeaf(const IntTuple &a, const IntTuple &b) {
     int64_t r = x % y;
     return IntTuple((r != 0 && (r < 0) != (y < 0)) ? r + y : r); // floored
   }
-  DataType dt = IsPrimExpr(a) ? AsPrimExpr(a)->dtype : AsPrimExpr(b)->dtype;
+  PrimType dt = IsPrimExpr(a) ? AsPrimExpr(a).ty() : AsPrimExpr(b).ty();
   return IntTuple(FloorMod(AsConstOrPrimExpr(a, dt), AsConstOrPrimExpr(b, dt)));
 }
 
@@ -607,15 +609,14 @@ bool Compatible(const IntTuple &a, const IntTuple &b) {
   // CuTe compares integral terminals by value, not by expression identity.
   // Use the dynamic terminal's dtype for a constant peer and let Analyzer
   // prove algebraically equivalent expressions (for example n + n == 2*n).
-  DataType dtype =
-      IsPrimExpr(a) ? AsPrimExpr(a)->dtype : AsPrimExpr(b_size)->dtype;
+  PrimType dtype = IsPrimExpr(a) ? AsPrimExpr(a).ty() : AsPrimExpr(b_size).ty();
   if (IsPrimExpr(a) && IsPrimExpr(b_size) &&
-      AsPrimExpr(a)->dtype != AsPrimExpr(b_size)->dtype) {
+      AsPrimExpr(a).ty() != AsPrimExpr(b_size).ty()) {
     return false;
   }
   arith::Analyzer analyzer;
-  return analyzer.CanProveEqual(AsConstOrPrimExpr(a, dtype),
-                                AsConstOrPrimExpr(b_size, dtype));
+  return analyzer->CanProveEqual(AsConstOrPrimExpr(a, dtype),
+                                 AsConstOrPrimExpr(b_size, dtype));
 }
 
 Layout::Layout(Array<int64_t> shape, Array<int64_t> stride) {
@@ -1181,7 +1182,7 @@ namespace {
 IntTuple CeilDivLeaf(const IntTuple &a, const IntTuple &b) {
   if (IsConst(a) && IsConst(b))
     return IntTuple(CeilDiv(AsConst(a), AsConst(b)));
-  DataType dt = IsPrimExpr(a) ? AsPrimExpr(a)->dtype : AsPrimExpr(b)->dtype;
+  PrimType dt = IsPrimExpr(a) ? AsPrimExpr(a).ty() : AsPrimExpr(b).ty();
   return IntTuple(
       tvm::floordiv(AsConstOrPrimExpr(a, dt) + AsConstOrPrimExpr(b, dt) - 1,
                     AsConstOrPrimExpr(b, dt)));
@@ -1481,7 +1482,7 @@ namespace {
 // Also, we need to make sure not to mix with int64_t, because otherwise there
 // would be a lot of conversion nodes that prevent the analyzer from cancelling
 // out the terms.
-PrimExpr MakeI32(int x) { return IntImm(DataType::Int(32), x); }
+PrimExpr MakeI32(int x) { return IntImm(PrimType::Int(32), x); }
 
 // Probes a TileLang layout's row-major linearized physical address A(x).
 // The constant input shape, output strides, forward-index expressions, and
@@ -1523,12 +1524,12 @@ public:
 
   // Concrete address A(coords); nullopt if it does not fold to a constant.
   std::optional<int32_t> operator()(const std::vector<int32_t> &coords) const {
-    Map<Var, PrimExpr> vmap;
+    Map<PrimVar, PrimExpr> vmap;
     for (size_t k = 0; k < coords.size(); ++k)
       vmap.Set(placeholders_[k], MakeI32(coords[k]));
     int32_t addr = 0;
     for (size_t d = 0; d < forward_index_.size(); ++d) {
-      PrimExpr e = Substitute(forward_index_[d], vmap);
+      PrimExpr e = SubstituteLayoutVars(forward_index_[d], vmap);
       std::optional<int64_t> val = EvaluateConstantInteger(e);
       if (!val)
         return std::nullopt;
@@ -1540,13 +1541,14 @@ public:
   // Symbolic address A(vars). Built in int32 (the forward index's native
   // dtype): int64 casts in the spine are opaque to the simplifier's div/mod
   // rules and would defeat the equivalence proof.
-  PrimExpr Symbolic(const std::vector<Var> &vars) const {
-    Map<Var, PrimExpr> vmap;
+  PrimExpr Symbolic(const std::vector<PrimVar> &vars) const {
+    Map<PrimVar, PrimExpr> vmap;
     for (size_t k = 0; k < vars.size(); ++k)
       vmap.Set(placeholders_[k], vars[k]);
     PrimExpr a = MakeI32(0);
     for (size_t d = 0; d < forward_index_.size(); ++d) {
-      a = a + Substitute(forward_index_[d], vmap) * MakeI32(out_strides_[d]);
+      a = a + SubstituteLayoutVars(forward_index_[d], vmap) *
+                  MakeI32(out_strides_[d]);
     }
     return a;
   }
@@ -1555,12 +1557,12 @@ private:
   std::vector<int32_t> shape_;
   std::vector<int32_t> out_strides_;
   Array<PrimExpr> forward_index_;
-  std::vector<Var> placeholders_;
+  std::vector<PrimVar> placeholders_;
 };
 
 PrimExpr Bit(const PrimExpr &e, int k) {
-  PrimExpr shifted = k > 0 ? FloorDiv(e, IntImm(e->dtype, int64_t(1) << k)) : e;
-  return FloorMod(shifted, IntImm(e->dtype, 2));
+  PrimExpr shifted = k > 0 ? FloorDiv(e, IntImm(e.ty(), int64_t(1) << k)) : e;
+  return FloorMod(shifted, IntImm(e.ty(), 2));
 }
 
 // Rewrite the bitwise builtins a swizzle is built from into plain integer
@@ -1581,29 +1583,33 @@ PrimExpr Bit(const PrimExpr &e, int k) {
 // through ExprMutator's default child-rebuilding visitors.
 class BitOpLowerer : public ExprMutator {
 public:
-  explicit BitOpLowerer(arith::Analyzer *ana) : ana_(ana) {}
+  explicit BitOpLowerer(arith::AnalyzerObj *ana) : ana_(ana) {}
   using ExprMutator::operator();
 
 protected:
-  PrimExpr VisitExpr_(const CallNode *op) final {
-    if (op->args.size() == 2 && op->op.same_as(builtin::shift_left())) {
-      if (auto k = as_const_int(op->args[1])) {
+  Expr VisitExpr_(const CallNode *op) final {
+    if (op->args.size() == 2 && op->op.same_as(prim::builtin::shift_left())) {
+      if (auto k = as_const_int(op->args[1].as_or_throw<PrimExpr>())) {
         ICHECK(*k >= 0 && *k < 64);
-        return VisitExpr(op->args[0]) * IntImm(op->dtype, int64_t(1) << *k);
+        return VisitExpr(op->args[0]).as_or_throw<PrimExpr>() *
+               IntImm(op->ty.as_or_throw<PrimType>(), int64_t(1) << *k);
       }
     }
-    if (op->args.size() == 2 && op->op.same_as(builtin::shift_right())) {
-      if (auto k = as_const_int(op->args[1])) {
+    if (op->args.size() == 2 && op->op.same_as(prim::builtin::shift_right())) {
+      if (auto k = as_const_int(op->args[1].as_or_throw<PrimExpr>())) {
         ICHECK(*k >= 0 && *k < 64);
-        return FloorDiv(VisitExpr(op->args[0]),
-                        IntImm(op->dtype, int64_t(1) << *k));
+        return FloorDiv(
+            VisitExpr(op->args[0]).as_or_throw<PrimExpr>(),
+            IntImm(op->ty.as_or_throw<PrimType>(), int64_t(1) << *k));
       }
     }
-    if (op->args.size() == 2 && op->op.same_as(builtin::bitwise_and())) {
-      auto ca = as_const_int(op->args[0]), cb = as_const_int(op->args[1]);
+    if (op->args.size() == 2 && op->op.same_as(prim::builtin::bitwise_and())) {
+      auto ca = as_const_int(op->args[0].as_or_throw<PrimExpr>()),
+           cb = as_const_int(op->args[1].as_or_throw<PrimExpr>());
       if (ca || cb) {
         int64_t mask = ca ? *ca : *cb;
-        PrimExpr x = VisitExpr(ca ? op->args[1] : op->args[0]);
+        PrimExpr x =
+            VisitExpr(ca ? op->args[1] : op->args[0]).as_or_throw<PrimExpr>();
         if (mask >= 0) {
           PrimExpr out = MakeI32(0);
           for (int k = 0; (mask >> k) != 0; ++k)
@@ -1613,8 +1619,9 @@ protected:
         }
       }
     }
-    if (op->args.size() == 2 && op->op.same_as(builtin::bitwise_xor())) {
-      PrimExpr x = VisitExpr(op->args[0]), y = VisitExpr(op->args[1]);
+    if (op->args.size() == 2 && op->op.same_as(prim::builtin::bitwise_xor())) {
+      PrimExpr x = VisitExpr(op->args[0]).as_or_throw<PrimExpr>(),
+               y = VisitExpr(op->args[1]).as_or_throw<PrimExpr>();
       // Expand over the NARROWER operand's bit width: bits above it are zero
       // there, so x^y == the wider operand unchanged in that range. Bounding by
       // the min keeps a large base offset on the wide side out of the per-bit
@@ -1644,11 +1651,11 @@ protected:
   }
 
 private:
-  arith::Analyzer *ana_;
+  arith::AnalyzerObj *ana_;
 };
 
-PrimExpr LowerBitOps(const PrimExpr &e, arith::Analyzer *ana) {
-  return BitOpLowerer(ana)(e);
+PrimExpr LowerBitOps(const PrimExpr &e, arith::AnalyzerObj *ana) {
+  return BitOpLowerer(ana)(e).as_or_throw<PrimExpr>();
 }
 
 // Canonicalize every parity node FloorMod(x, 2) in `e`. Working mod 2:
@@ -1663,11 +1670,11 @@ PrimExpr LowerBitOps(const PrimExpr &e, arith::Analyzer *ana) {
 // ExprMutator's default child-rebuilding visitors.
 class ParityCanonicalizer : public ExprMutator {
 public:
-  explicit ParityCanonicalizer(arith::Analyzer *ana) : ana_(ana) {}
+  explicit ParityCanonicalizer(arith::AnalyzerObj *ana) : ana_(ana) {}
   using ExprMutator::operator();
 
 protected:
-  PrimExpr VisitExpr_(const FloorModNode *op) final {
+  Expr VisitExpr_(const prim::FloorModNode *op) final {
     if (!is_two(op->b))
       return ExprMutator::VisitExpr_(op);
     std::vector<PrimExpr> terms;
@@ -1697,12 +1704,12 @@ private:
 
   // Flatten `x` (interpreted mod 2) into leaf terms + a constant parity.
   void flatten(const PrimExpr &x, std::vector<PrimExpr> *terms, int *parity) {
-    if (const auto *op = x.as<AddNode>()) {
+    if (const auto *op = x.as<prim::AddNode>()) {
       flatten(op->a, terms, parity);
       flatten(op->b, terms, parity);
       return;
     }
-    if (const auto *op = x.as<SubNode>()) { // -t == t (mod 2)
+    if (const auto *op = x.as<prim::SubNode>()) { // -t == t (mod 2)
       flatten(op->a, terms, parity);
       flatten(op->b, terms, parity);
       return;
@@ -1711,7 +1718,7 @@ private:
       *parity ^= static_cast<int>(imm->value & 1);
       return;
     }
-    if (const auto *op = x.as<MulNode>()) {
+    if (const auto *op = x.as<prim::MulNode>()) {
       const auto *ca = op->a.as<IntImmNode>();
       const auto *cb = op->b.as<IntImmNode>();
       if (ca || cb) {
@@ -1722,7 +1729,7 @@ private:
         return;
       }
     }
-    if (const auto *op = x.as<FloorModNode>()) {
+    if (const auto *op = x.as<prim::FloorModNode>()) {
       if (is_two(op->b)) { // (y % 2) == y (mod 2)
         flatten(op->a, terms, parity);
         return;
@@ -1731,10 +1738,11 @@ private:
     // Leaf: canonicalize via the simplifier's single-bit form (recursing into
     // any nested parities first). If that form is itself a parity of a sum,
     // keep flattening through it.
-    PrimExpr key = ana_->Simplify(FloorMod(VisitExpr(x), 2));
-    if (const auto *km = key.as<FloorModNode>()) {
-      if (is_two(km->b) && (km->a.as<AddNode>() || km->a.as<SubNode>() ||
-                            km->a.as<MulNode>() || km->a.as<IntImmNode>())) {
+    PrimExpr key = ana_->Simplify(FloorMod(VisitPrimExpr(x), 2));
+    if (const auto *km = key.as<prim::FloorModNode>()) {
+      if (is_two(km->b) &&
+          (km->a.as<prim::AddNode>() || km->a.as<prim::SubNode>() ||
+           km->a.as<prim::MulNode>() || km->a.as<IntImmNode>())) {
         flatten(km->a, terms, parity);
         return;
       }
@@ -1746,11 +1754,11 @@ private:
     terms->push_back(key);
   }
 
-  arith::Analyzer *ana_;
+  arith::AnalyzerObj *ana_;
 };
 
-PrimExpr ParityCanon(const PrimExpr &e, arith::Analyzer *ana) {
-  return ParityCanonicalizer(ana)(e);
+PrimExpr ParityCanon(const PrimExpr &e, arith::AnalyzerObj *ana) {
+  return ParityCanonicalizer(ana)(e).as_or_throw<PrimExpr>();
 }
 
 // Decide E == 0 for all assignments of the analyzer's range-bound variables,
@@ -1758,7 +1766,7 @@ PrimExpr ParityCanon(const PrimExpr &e, arith::Analyzer *ana) {
 // every step is an exact identity, so a 0 result is a proof; a non-0 fixpoint
 // means "not proven" and the caller must reject. Complete enough in practice
 // that neither sampling nor an SMT solver is needed.
-bool ProveZero(PrimExpr e, arith::Analyzer *ana, int max_rounds = 8) {
+bool ProveZero(PrimExpr e, arith::AnalyzerObj *ana, int max_rounds = 8) {
   PrimExpr d = ana->Simplify(e);
   size_t last_hash = 0;
   for (int round = 0; round < max_rounds; ++round) {
@@ -1800,12 +1808,12 @@ bool ProveEquivalent(const AddrProbe &probe, const Swizzle &swizzle,
 
   // Analyzer with each coordinate range-bound: x_k in [0, shape[k]).
   arith::Analyzer ana;
-  std::vector<Var> vars;
+  std::vector<PrimVar> vars;
   for (size_t k = 0; k < shape.size(); ++k) {
-    Var v("c" + std::to_string(k), DataType::Int(32));
+    PrimVar v("c" + std::to_string(k), PrimType::Int(32));
     vars.push_back(v);
     if (shape[k] > 0)
-      ana.Bind(v, Range(MakeI32(0), MakeI32(shape[k])));
+      ana->Bind(v, Range(MakeI32(0), MakeI32(shape[k])));
   }
 
   PrimExpr A = probe.Symbolic(vars);
@@ -1831,7 +1839,7 @@ bool ProveEquivalent(const AddrProbe &probe, const Swizzle &swizzle,
   }
 
   if (b <= 0)
-    return ProveZero(A - Q, &ana);
+    return ProveZero(A - Q, ana.get());
 
   PrimExpr mid = MakeI32(0);
   for (int p = 0; p < b; ++p)
@@ -1839,7 +1847,7 @@ bool ProveEquivalent(const AddrProbe &probe, const Swizzle &swizzle,
                     MakeI32(int64_t(1) << p);
   PrimExpr tgt =
       FloorMod(FloorDiv(Q, MakeI32(int64_t(1) << m)), MakeI32(int64_t(1) << b));
-  return ProveZero(A - Q - (mid - tgt) * MakeI32(int64_t(1) << m), &ana);
+  return ProveZero(A - Q - (mid - tgt) * MakeI32(int64_t(1) << m), ana.get());
 }
 
 } // namespace
@@ -2083,8 +2091,8 @@ ComposedLayoutFromTileLang(const tvm::tl::Layout &layout,
 //   layout(mins + c) == layout(mins) + sublayout(c)  for all c in the sub-tile.
 // Returns (offset, sublayout). `mins` may be dynamic (e.g. a sliced operand
 // `B[:, j*64:...]` inside a loop), so the offset is an IntTuple, not an int.
-Tuple<IntTuple, Layout> Restrict(const Layout &layout,
-                                 const Array<Range> &range) {
+ffi::Tuple<IntTuple, Layout> Restrict(const Layout &layout,
+                                      const Array<Range> &range) {
   int64_t r = Rank(layout->shape);
   ICHECK_EQ(static_cast<int64_t>(range.size()), r)
       << "Restrict: region rank " << range.size() << " != layout rank " << r;
@@ -2102,8 +2110,8 @@ Tuple<IntTuple, Layout> Restrict(const Layout &layout,
   }
   IntTuple offset = layout(IntTupleTuple(min_modes));
   if (sub_modes.empty()) // everything pinned to one element: scalar (1):(0).
-    return Tuple<IntTuple, Layout>(offset, Layout(1, 0));
-  return Tuple<IntTuple, Layout>(offset, MakeLayout(sub_modes));
+    return ffi::Tuple<IntTuple, Layout>(offset, Layout(1, 0));
+  return ffi::Tuple<IntTuple, Layout>(offset, MakeLayout(sub_modes));
 }
 
 namespace {

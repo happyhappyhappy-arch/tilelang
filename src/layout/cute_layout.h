@@ -279,7 +279,7 @@ inline PrimExpr AsPrimExpr(const IntTuple &t) {
   ICHECK(e != nullptr) << "AsPrimExpr on a non-PrimExpr leaf";
   return e->value;
 }
-inline PrimExpr AsConstOrPrimExpr(const IntTuple &t, const DataType &dtype) {
+inline PrimExpr AsConstOrPrimExpr(const IntTuple &t, const PrimType &dtype) {
   if (const auto *c = t.as<IntTupleConstNode>())
     return IntImm(dtype, c->value);
   const auto *e = t.as<IntTuplePrimExprNode>();
@@ -623,8 +623,8 @@ ComposedLayoutFromTileLang(const tvm::tl::Layout &layout,
 /// Restrict the layout to a sublayout defined by a region.
 /// @return result.sublayout(coords_in_region) + result.offset
 //            == layout(range.min + coords_in_region)
-Tuple<IntTuple, Layout> Restrict(const Layout &layout,
-                                 const Array<Range> &range);
+ffi::Tuple<IntTuple, Layout> Restrict(const Layout &layout,
+                                      const Array<Range> &range);
 
 } // namespace cute
 } // namespace tl

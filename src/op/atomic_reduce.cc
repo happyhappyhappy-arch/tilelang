@@ -5,9 +5,9 @@
  */
 
 #include "./atomic_reduce.h"
+#include "support/cast.h"
 #include "support/check.h"
 #include "utils.h"
-#include <tvm/ir/cast.h>
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/op_attr_types.h>
@@ -65,7 +65,7 @@ void RegisterAtomicReduceImpl(AtomicReduceImpl impl) {
 // AtomicMax Implementation
 // ============================================================================
 
-AtomicMax::AtomicMax(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
+AtomicMax::AtomicMax(Array<Expr> args, Map<String, Any> annotations) {
   ICHECK(args.size() >= 2)
       << "AtomicMax expects at least 2 arguments (src, dst), got "
       << args.size();
@@ -78,7 +78,7 @@ AtomicMax::AtomicMax(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
     node->src_range = src_access.region->region;
     access_regions.push_back(std::move(src_access));
   } else {
-    node->src_value = args[0];
+    node->src_value = args[0].as_or_throw<PrimExpr>();
   }
 
   auto dst_access = NormalizeToAccessRegion(args[1], kAccessReadWrite);
@@ -106,7 +106,7 @@ const Op &AtomicMaxNode::GetElemOp() const { return atomic_max_elem_op(); }
 // AtomicMin Implementation
 // ============================================================================
 
-AtomicMin::AtomicMin(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
+AtomicMin::AtomicMin(Array<Expr> args, Map<String, Any> annotations) {
   ICHECK(args.size() >= 2)
       << "AtomicMin expects at least 2 arguments (src, dst), got "
       << args.size();
@@ -119,7 +119,7 @@ AtomicMin::AtomicMin(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
     node->src_range = src_access.region->region;
     access_regions.push_back(std::move(src_access));
   } else {
-    node->src_value = args[0];
+    node->src_value = args[0].as_or_throw<PrimExpr>();
   }
 
   auto dst_access = NormalizeToAccessRegion(args[1], kAccessReadWrite);
@@ -162,12 +162,12 @@ Stmt AtomicOpBaseNode::Lower(const LowerArgs &lower_args,
 TIR_REGISTER_TL_TILE_OP(AtomicMax, atomicmax)
     .set_num_inputs(2)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TIR_REGISTER_TL_TILE_OP(AtomicMin, atomicmin)
     .set_num_inputs(2)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   AtomicMaxNode::RegisterReflection();

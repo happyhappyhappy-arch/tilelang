@@ -6,7 +6,6 @@
 
 #include "fill.h"
 #include "support/check.h"
-#include <tvm/ir/cast.h>
 
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/op.h>
@@ -91,7 +90,7 @@ void RegisterFillImpl(FillImpl impl) {
  * lanes) and will terminate (via ICHECK) if inputs are unsupported or out
  * of bounds.
  */
-Fill::Fill(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
+Fill::Fill(Array<Expr> args, Map<String, Any> annotations) {
   ObjectPtr<FillNode> node = make_object<FillNode>();
 
   AccessRegion dst_access = NormalizeToAccessRegion(args[0], kAccessWrite);
@@ -99,10 +98,9 @@ Fill::Fill(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
   node->region = dst_access.region->region;
   node->SetAccessRegions({dst_access});
 
-  if (args[1]->dtype != node->dst->dtype) {
-    node->value = Cast(node->dst->dtype, args[1]);
-  } else {
-    node->value = args[1];
+  node->value = args[1].as_or_throw<PrimExpr>();
+  if (node->value.ty() != node->dst->dtype) {
+    node->value = prim::Cast(node->dst->dtype, node->value);
   }
 
   ICHECK(node->region.size() == node->dst->shape.size())
@@ -171,7 +169,7 @@ For FillNode::MakeSIMTLoop(arith::Analyzer *analyzer) const {
   Array<IterVar> loop_vars;
   Array<PrimExpr> dst_indices;
   for (int i = 0; i < ndim; i++) {
-    Var var = Var(std::string{char('i' + i)}, region[i]->extent->dtype);
+    PrimVar var(std::string{char('i' + i)}, region[i]->extent.ty());
     loop_vars.push_back({region[i], var, IterVarType::kDataPar});
     // Offset the loop induction variable by region min to honor sliced regions
     dst_indices.push_back(region[i]->min + var);
@@ -181,7 +179,7 @@ For FillNode::MakeSIMTLoop(arith::Analyzer *analyzer) const {
     body = For(loop_vars[i]->var, 0, loop_vars[i]->dom->extent,
                ForKind::kParallel, body);
   }
-  return Downcast<For>(body);
+  return body.as_or_throw<For>();
 }
 
 /**
@@ -227,7 +225,7 @@ LayoutMap FillNode::InferLayout(const LayoutInferArgs &layout_args,
 TIR_REGISTER_TL_TILE_OP(Fill, fill)
     .set_num_inputs(2)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_FFI_STATIC_INIT_BLOCK() { FillNode::RegisterReflection(); }
 

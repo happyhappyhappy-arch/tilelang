@@ -10,10 +10,8 @@
 namespace tvm {
 namespace tl {
 
-using namespace tirx;
-
-TVM_REGISTER_PASS_CONFIG_OPTION(kCPUParallel, Bool);
-TVM_REGISTER_PASS_CONFIG_OPTION(kCPUParallelMinTrip, Integer);
+TVM_REGISTER_PASS_CONFIG_OPTION(kCPUParallel, bool);
+TVM_REGISTER_PASS_CONFIG_OPTION(kCPUParallelMinTrip, int64_t);
 
 } // namespace tl
 } // namespace tvm

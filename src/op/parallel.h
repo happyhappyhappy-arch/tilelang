@@ -73,7 +73,7 @@ private:
   ParallelLoopNestVisitor(ParallelOpNode *op) : p(op) {};
   void VisitStmt_(const ForNode *op) override;
   void VisitStmt_(const BufferStoreNode *op) override;
-  void VisitExpr_(const BufferLoadNode *op) override;
+  void VisitExpr_(const TensorLoadNode *op) override;
   void VisitExpr_(const CallNode *op) override;
 
   ParallelOpNode *p;
@@ -92,7 +92,7 @@ public:
     bool is_write = false;
   };
 
-  using BufferIndiceMap = std::unordered_map<Buffer, BufferAccessInfo,
+  using BufferIndiceMap = std::unordered_map<BufferVar, BufferAccessInfo,
                                              ObjectPtrHash, ObjectPtrEqual>;
 
   // One tl.reducer_update site inside this nest. The reducer stays out of
@@ -100,7 +100,7 @@ public:
   // act as a layout source or be validated as a fragment); its layout is
   // proposed separately once the loop layout is solved.
   struct ReducerUpdateRecord {
-    Buffer buffer;
+    BufferVar buffer;
     Array<PrimExpr> indices;
     PrimExpr value;
   };
@@ -175,7 +175,7 @@ public:
   // Get the mapping from buffer to access indices + access type.
   const BufferIndiceMap &GetIndiceMap() const { return indice_map_; }
   // Get buffers in the order they first appear in the loop body.
-  const std::vector<Buffer> &GetAccessOrder() const { return access_order_; }
+  const std::vector<BufferVar> &GetAccessOrder() const { return access_order_; }
   // Get the predicate for a given logical thread index. GPU callers pass the
   // real threadIdx.x Var; callers without thread bindings (e.g. CPU) pass
   // constant 0.
@@ -186,16 +186,16 @@ public:
 
 private:
   // Complete the fragment layout for a given buffer.
-  Fragment CompleteBufferFragment(const Buffer &buffer) const;
+  Fragment CompleteBufferFragment(const BufferVar &buffer) const;
   // Check if the buffer is accessed with common indices (i.e., loop variables).
-  bool IsCommonAccessIndice(const Buffer &buffer) const;
+  bool IsCommonAccessIndice(const BufferVar &buffer) const;
   // Record buffer access and validate consistent indices.
-  void RecordBufferAccess(const Buffer &buffer, const Array<PrimExpr> &indices,
-                          bool is_write);
+  void RecordBufferAccess(const BufferVar &buffer,
+                          const Array<PrimExpr> &indices, bool is_write);
   // Access info lookup with validation.
-  const BufferAccessInfo &GetAccessInfo(const Buffer &buffer) const;
+  const BufferAccessInfo &GetAccessInfo(const BufferVar &buffer) const;
   // Check if a buffer is completely replicated (all threads hold same data).
-  bool IsBufferCompletelyReplicated(const Buffer &buffer,
+  bool IsBufferCompletelyReplicated(const BufferVar &buffer,
                                     const LayoutMap &layout_map) const;
   // Validate a candidate loop layout against all source fragments in
   // T.layout_map. Returns true if compatible with all fragments; otherwise
@@ -204,7 +204,7 @@ private:
   bool ValidateCandidateAgainstFragments(
       const Fragment &candidate, const LayoutInferArgs &layout_args,
       bool throw_on_error = false, bool check_forward_index = false,
-      const Buffer &source_buffer = Buffer()) const;
+      const BufferVar &source_buffer = BufferVar()) const;
   // Choose the better loop layout from two candidates using validation,
   // containment and replication heuristic.
   Fragment ChooseBestCandidate(const Fragment &candidate_from_buffer,
@@ -219,7 +219,7 @@ private:
   // inside InferLayout.)
   // Compute loop layout from a source buffer's fragment mapping.
   Fragment
-  ComputeLoopLayoutFromBuffer(const Buffer &buffer,
+  ComputeLoopLayoutFromBuffer(const BufferVar &buffer,
                               const LayoutInferArgs &layout_args) const;
   // Compute plan-based loop layout candidate using vectorization and thread
   // bounds.
@@ -241,13 +241,14 @@ private:
   // Add replication guard predicates when needed for cross-thread stores.
   void BuildReplicationGuardsIfNeeded(
       const LayoutInferArgs &layout_args,
-      const std::vector<Buffer> &store_shared_global_buffers,
-      const std::vector<Buffer> &store_fragment_buffers,
+      const std::vector<BufferVar> &store_shared_global_buffers,
+      const std::vector<BufferVar> &store_fragment_buffers,
       bool has_cross_thread_access,
-      const std::vector<Buffer> &const_index_fragment_buffer) const;
+      const std::vector<BufferVar> &const_index_fragment_buffer) const;
   // Add a predicate to the current predicate expression.
   void AddPredicate(const PrimExpr &expr) const {
-    predicate_ = predicate_.defined() ? And(expr, predicate_.value()) : expr;
+    predicate_ =
+        predicate_.defined() ? prim::And(expr, predicate_.value()) : expr;
   }
   // Expand Bind values to find fragment buffer accesses and add them to
   // indice_map_. This handles cases like: a = block_mask_f[i]; T.copy(A[a, 0],
@@ -263,7 +264,7 @@ private:
   BufferIndiceMap indice_map_;
   // Stable first-use order for indice_map_.  Layout inference must not depend
   // on std::unordered_map iteration order when selecting source buffers.
-  std::vector<Buffer> access_order_;
+  std::vector<BufferVar> access_order_;
   // The loop variables for the parallel loop nest.
   Array<IterVar> loop_vars_;
   // tl.reducer_update sites in this nest, in body order (re-derived from
@@ -276,9 +277,9 @@ private:
   // Whether the loop body has cross-thread shared/global memory access.
   bool has_cross_thread_access_ = false;
   // Buffers that are stored to shared/global memory in the loop body.
-  std::vector<Buffer> store_shared_global_buffers_;
+  std::vector<BufferVar> store_shared_global_buffers_;
   // Fragment buffers that are stored to in the loop body.
-  std::vector<Buffer> store_fragment_buffers_;
+  std::vector<BufferVar> store_fragment_buffers_;
 };
 
 class ParallelOp : public TileOperator {

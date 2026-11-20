@@ -79,12 +79,12 @@ public:
 
 class GemmSPNode : public TileOperatorNode {
 public:
-  tirx::Buffer A, E, B, C;
+  tirx::BufferVar A, E, B, C;
   // pointer to the A, E, B, C
   BufferRegion aRegion_, eRegion_, bRegion_, cRegion_;
   bool trans_A, trans_B, trans_E;
   int M, N, K;
-  PrimExpr clear_accum = const_false();
+  PrimExpr clear_accum = IntImm::Bool(false);
   int wg_wait = 0;
   bool isWgmma_ = false;
   bool isTcgen05_ = false;
@@ -152,8 +152,8 @@ void RegisterGemmSPImpl(GemmSPImpl impl);
 class GemmSP : public TileOperator {
 public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(GemmSP, TileOperator, GemmSPNode);
-  TVM_DLL GemmSP(Array<PrimExpr> args,
-                 Map<String, ObjectRef> annotations = Map<String, ObjectRef>());
+  TVM_DLL GemmSP(Array<Expr> args,
+                 Map<String, Any> annotations = Map<String, Any>());
   static const Op &Get();
 };
 

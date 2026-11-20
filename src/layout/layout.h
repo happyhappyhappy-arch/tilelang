@@ -381,6 +381,9 @@ std::pair<Fragment, PrimExpr>
 CondenseReplicateVarKeepingBoundary(const Fragment &fragment,
                                     const PrimExpr &combine_size);
 
+PrimExpr SubstituteLayoutVars(const PrimExpr &expr,
+                              const ffi::Map<tirx::PrimVar, PrimExpr> &values);
+
 tirx::PrimVar InputPlaceholder(size_t idx);
 tirx::PrimVar ReplicationPlaceholder();
 tirx::IterVar MakeIterVar(std::string name, PrimExpr dom);

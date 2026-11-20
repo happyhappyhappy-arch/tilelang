@@ -39,8 +39,8 @@ static constexpr const char *kLaunchThreads = "tl.launch_threads";
 
 } // namespace attr
 
-inline ffi::Optional<PrimExpr> GetAnnotatedMbarPhaseExpr(
-    const ffi::Map<ffi::String, ffi::ObjectRef> &annotations) {
+inline ffi::Optional<PrimExpr>
+GetAnnotatedMbarPhaseExpr(const ffi::Map<ffi::String, ffi::Any> &annotations) {
   if (auto val = annotations.Get(attr::kPipelineMbarPhaseExpr)) {
     if (auto expr = val.value().as<PrimExpr>()) {
       return *expr;

@@ -9,7 +9,7 @@
 #include "utils.h"
 
 #include "builtin.h"
-#include <tvm/ir/cast.h>
+#include "support/cast.h"
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/function.h>
@@ -85,7 +85,7 @@ void RegisterGemmSPImpl(GemmSPImpl impl) {
  *      clear_accum (Bool)]
  *   Backend lowering knobs (wg_wait) ride in the annotations map.
  */
-GemmSP::GemmSP(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
+GemmSP::GemmSP(Array<Expr> args, Map<String, Any> annotations) {
   ObjectPtr<GemmSPNode> node = make_object<GemmSPNode>();
   auto a_access = NormalizeToAccessRegion(args[0], kAccessRead);
   auto e_access = NormalizeToAccessRegion(args[1], kAccessRead);
@@ -103,9 +103,9 @@ GemmSP::GemmSP(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
   node->B = node->bRegion_->buffer;
   node->C = node->cRegion_->buffer;
 
-  node->trans_A = args[4].as<Bool>().value();
-  node->trans_E = args[5].as<Bool>().value();
-  node->trans_B = args[6].as<Bool>().value();
+  node->trans_A = GetBoolImm(args[4]);
+  node->trans_E = GetBoolImm(args[5]);
+  node->trans_B = GetBoolImm(args[6]);
   node->M = args[7].as<IntImm>().value()->value;
   node->N = args[8].as<IntImm>().value()->value;
   node->K = args[9].as<IntImm>().value()->value;
@@ -183,18 +183,18 @@ Stmt GemmSPNode::Lower(const LowerArgs &lower_args,
         SBlockNode *n = block.CopyOnWrite();
         n->name_hint = global_symbol.value();
         n->annotations.Set(tl::attr::kLexicalAllocScope,
-                           IntImm(DataType::Int(32), 1));
+                           IntImm(PrimType::Int(32), 1));
       }
       return SBlockRealize(block_realize->iter_values, block_realize->predicate,
                            block);
     }
     // wrap with block realize node
-    Map<String, ObjectRef> block_annotations;
+    Map<String, Any> block_annotations;
     block_annotations.Set(tl::attr::kLexicalAllocScope,
-                          IntImm(DataType::Int(32), 1));
+                          IntImm(PrimType::Int(32), 1));
     return SBlockRealize(
         /*iter_values=*/Array<PrimExpr>(),
-        /*predicate=*/const_true(),
+        /*predicate=*/IntImm::Bool(true),
         /*block=*/
         SBlock(/*iter_vars=*/{}, /*reads=*/{}, /*writes=*/{},
                /*name_hint=*/global_symbol.value(), prim_func->body,
@@ -220,7 +220,7 @@ LayoutMap GemmSPNode::InferLayout(const LayoutInferArgs &layout_args,
         ResolveGemmSPImpl(layout_args.target)
             .reuse_existing_shared_layout(gemm_inst);
     for (auto kv : inferred_layouts) {
-      const Buffer &buf = kv.first;
+      const BufferVar &buf = kv.first;
       const Layout &layout = kv.second;
       if (reuse_existing_shared_layout && IsSharedBuffer(buf) &&
           layout_args.layout_map.count(buf)) {
@@ -244,35 +244,35 @@ LayoutMap GemmSPNode::InferLayout(const LayoutInferArgs &layout_args,
 TIR_REGISTER_TL_TILE_OP(GemmSP, gemm_sp)
     .set_num_inputs(-1)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_REGISTER_OP("tl.tileop.wgmma_gemm_sp")
     .set_attr<TScriptPrinterName>("TScriptPrinterName", "wgmma_gemm_sp")
     .set_attr<OpBuilderFunc>("TLOpBuilder",
-                             [](Array<PrimExpr> args,
-                                Map<String, ObjectRef> annotations) {
-                               Map<String, ObjectRef> ann = annotations;
+                             [](Array<Expr> args,
+                                Map<String, Any> annotations) {
+                               Map<String, Any> ann = annotations;
                                ann.Set("is_wgmma",
-                                       IntImm(DataType::Int(32), 1));
+                                       IntImm(PrimType::Int(32), 1));
                                return GemmSP(args, ann);
                              })
     .set_num_inputs(-1)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_REGISTER_OP("tl.tileop.tcgen05_gemm_sp")
     .set_attr<TScriptPrinterName>("TScriptPrinterName", "tcgen05_gemm_sp")
     .set_attr<OpBuilderFunc>("TLOpBuilder",
-                             [](Array<PrimExpr> args,
-                                Map<String, ObjectRef> annotations) {
-                               Map<String, ObjectRef> ann = annotations;
+                             [](Array<Expr> args,
+                                Map<String, Any> annotations) {
+                               Map<String, Any> ann = annotations;
                                ann.Set("is_tcgen05",
-                                       IntImm(DataType::Int(32), 1));
+                                       IntImm(PrimType::Int(32), 1));
                                return GemmSP(args, ann);
                              })
     .set_num_inputs(-1)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   GemmSPWarpPolicyNode::RegisterReflection();

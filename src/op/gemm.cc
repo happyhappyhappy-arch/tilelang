@@ -4,8 +4,8 @@
  */
 
 #include "gemm.h"
+#include "support/cast.h"
 #include "support/check.h"
-#include <tvm/ir/cast.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/tirx/stmt.h>
 
@@ -80,8 +80,8 @@ void RegisterGemmImpl(GemmImpl impl) {
  *   built through tl.tileop.gemm_blockscaled (GemmBlockScaled) instead.
  *   Backend lowering knobs (k_pack, wg_wait) ride in the annotations map.
  */
-void GemmNode::InitFromDenseArgs(GemmNode *node, const Array<PrimExpr> &args,
-                                 const Map<String, ObjectRef> &annotations) {
+void GemmNode::InitFromDenseArgs(GemmNode *node, const Array<Expr> &args,
+                                 const Map<String, Any> &annotations) {
   auto a_access = NormalizeToAccessRegion(args[0], kAccessRead);
   auto b_access = NormalizeToAccessRegion(args[1], kAccessRead);
   auto c_access = NormalizeToAccessRegion(args[2], kAccessReadWrite);
@@ -94,8 +94,8 @@ void GemmNode::InitFromDenseArgs(GemmNode *node, const Array<PrimExpr> &args,
   node->a_ = node->aRegion_->buffer;
   node->b_ = node->bRegion_->buffer;
   node->c_ = node->cRegion_->buffer;
-  node->transA_ = args[3].as<Bool>().value();
-  node->transB_ = args[4].as<Bool>().value();
+  node->transA_ = GetBoolImm(args[3]);
+  node->transB_ = GetBoolImm(args[4]);
   node->m_ = args[5].as<IntImm>().value()->value;
   node->n_ = args[6].as<IntImm>().value()->value;
   node->k_ = args[7].as<IntImm>().value()->value;
@@ -126,15 +126,15 @@ void GemmNode::InitFromDenseArgs(GemmNode *node, const Array<PrimExpr> &args,
     ICHECK(int_val) << "is_tcgen05 annotation must be IntImmNode";
     node->isTcgen05_ = int_val->value != 0;
   }
-  if (args.size() > 10 && args[10]->IsInstance<BufferLoadNode>()) {
-    node->mbar_ = Downcast<BufferLoad>(args[10]);
+  if (args.size() > 10 && args[10]->IsInstance<TensorLoadNode>()) {
+    node->mbar_ = args[10].as_or_throw<TensorLoad>();
   }
   node->cCoords_ = Array<PrimExpr>(
       {args[11].as<PrimExpr>().value(), args[12].as<PrimExpr>().value()});
   node->annotations_ = annotations;
 }
 
-Gemm::Gemm(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
+Gemm::Gemm(Array<Expr> args, Map<String, Any> annotations) {
   ICHECK_EQ(args.size(), 13)
       << "tl.tileop.gemm expects exactly 13 positional slots, but got "
       << args.size()
@@ -209,18 +209,18 @@ Stmt GemmNode::Lower(const LowerArgs &lower_args,
         SBlockNode *n = block.CopyOnWrite();
         n->name_hint = global_symbol.value();
         n->annotations.Set(tl::attr::kLexicalAllocScope,
-                           IntImm(DataType::Int(32), 1));
+                           IntImm(PrimType::Int(32), 1));
       }
       return SBlockRealize(block_realize->iter_values, block_realize->predicate,
                            block);
     }
     // wrap with block realize node
-    Map<String, ObjectRef> block_annotations;
+    Map<String, Any> block_annotations;
     block_annotations.Set(tl::attr::kLexicalAllocScope,
-                          IntImm(DataType::Int(32), 1));
+                          IntImm(PrimType::Int(32), 1));
     return SBlockRealize(
         /*iter_values=*/Array<PrimExpr>(),
-        /*predicate=*/const_true(),
+        /*predicate=*/IntImm::Bool(true),
         /*block=*/
         SBlock(/*iter_vars=*/{}, /*reads=*/{}, /*writes=*/{},
                /*name_hint=*/global_symbol.value(), prim_func->body,
@@ -251,7 +251,7 @@ LayoutMap GemmNode::InferLayout(const LayoutInferArgs &layout_args,
         ResolveGemmImpl(layout_args.target)
             .reuse_existing_shared_layout(gemm_inst);
     for (auto kv : inferred_layouts) {
-      const Buffer &buf = kv.first;
+      const BufferVar &buf = kv.first;
       const Layout &layout = kv.second;
       if (reuse_existing_shared_layout && IsSharedBuffer(buf) &&
           layout_args.layout_map.count(buf)) {
@@ -275,35 +275,35 @@ LayoutMap GemmNode::InferLayout(const LayoutInferArgs &layout_args,
 TIR_REGISTER_TL_TILE_OP(Gemm, gemm)
     .set_num_inputs(-1)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_REGISTER_OP("tl.tileop.wgmma_gemm")
     .set_attr<TScriptPrinterName>("TScriptPrinterName", "wgmma_gemm")
     .set_attr<OpBuilderFunc>("TLOpBuilder",
-                             [](Array<PrimExpr> args,
-                                Map<String, ObjectRef> annotations) {
-                               Map<String, ObjectRef> ann = annotations;
+                             [](Array<Expr> args,
+                                Map<String, Any> annotations) {
+                               Map<String, Any> ann = annotations;
                                ann.Set("is_wgmma",
-                                       IntImm(DataType::Int(32), 1));
+                                       IntImm(PrimType::Int(32), 1));
                                return Gemm(args, ann);
                              })
     .set_num_inputs(-1)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_REGISTER_OP("tl.tileop.tcgen05_gemm")
     .set_attr<TScriptPrinterName>("TScriptPrinterName", "tcgen05_gemm")
     .set_attr<OpBuilderFunc>("TLOpBuilder",
-                             [](Array<PrimExpr> args,
-                                Map<String, ObjectRef> annotations) {
-                               Map<String, ObjectRef> ann = annotations;
+                             [](Array<Expr> args,
+                                Map<String, Any> annotations) {
+                               Map<String, Any> ann = annotations;
                                ann.Set("is_tcgen05",
-                                       IntImm(DataType::Int(32), 1));
+                                       IntImm(PrimType::Int(32), 1));
                                return Gemm(args, ann);
                              })
     .set_num_inputs(-1)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_REGISTER_OP("tl.GemmWarpPolicy")
     .set_attr<TScriptPrinterName>("TScriptPrinterName", "GemmWarpPolicy");

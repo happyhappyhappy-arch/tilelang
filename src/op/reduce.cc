@@ -4,9 +4,9 @@
  */
 
 #include "reduce.h"
+#include "support/cast.h"
 #include "support/check.h"
 #include <tvm/ffi/extra/structural_equal.h>
-#include <tvm/ir/cast.h>
 
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/op.h>
@@ -18,10 +18,10 @@
 #include "../op/parallel.h"
 #include "../transform/loop_partition.h"
 #include "builtin.h"
-#include "tir/transforms/ir_utils.h"
+#include "tirx/transform/ir_utils.h"
 #include "tvm/ir/expr.h"
 #include "utils.h"
-#include <tvm/tirx/expr.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/tirx/stmt.h>
 
 #include <sstream>
@@ -68,14 +68,14 @@ void RegisterReduceImpl(ReduceImpl impl) {
   ReduceImplRegistry().push_back(impl);
 }
 
-void CheckReductionDType(DataType dtype, const char *op) {
-  CHECK(dtype.bits() >= 8 || dtype.is_bool(), ValueError)
+void CheckReductionDType(PrimType dtype, const char *op) {
+  CHECK(dtype.bits() >= 8 || dtype.MatchesCode(kDLBool), ValueError)
       << op << " does not support sub-byte accumulator dtype " << dtype
       << ". Use float16/float32 or an integer dtype of at least 8 bits for "
          "the output/reducer buffer.";
 }
 
-ReduceOp::ReduceOp(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
+ReduceOp::ReduceOp(Array<Expr> args, Map<String, Any> annotations) {
   ObjectPtr<ReduceOpNode> node = make_object<ReduceOpNode>();
   node->annotations = annotations;
   // Accept BufferRegion/BufferLoad for src/dst
@@ -87,10 +87,10 @@ ReduceOp::ReduceOp(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
   node->src = node->srcRegion_->buffer;
   node->dst = node->dstRegion_->buffer;
   CheckReductionDType(node->dst->dtype, "reduce");
-  std::string reduce_type = args[2].as<StringImm>().value()->value;
+  std::string reduce_type = args[2].as<prim::StringImm>().value()->value;
   node->dim = args[3].as<IntImm>().value()->value;
   node->type = ReduceType(reduce_type);
-  node->clear = args[4].as<Bool>().value();
+  node->clear = GetBoolImm(args[4]);
   // Optional "batch" annotation: number of output elements per batched
   // AllReduce call (default 1 = scalar).
   if (auto opt = annotations.Get("batch")) {
@@ -102,7 +102,7 @@ ReduceOp::ReduceOp(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
   // Optional annotation: "nan_propagate" — for fp16/bf16 max/min/absmax,
   // when true, lower to CUDA __hmax_nan/__hmin_nan so NaNs propagate.
   if (auto opt = annotations.Get("nan_propagate")) {
-    if (auto b = opt.value().as<Bool>()) {
+    if (auto b = opt.value().as<bool>()) {
       node->nan_propagate = b.value();
     } else if (auto i = opt.value().as<IntImm>()) {
       node->nan_propagate = i.value()->value != 0;
@@ -112,7 +112,8 @@ ReduceOp::ReduceOp(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
       node->type->IsMax() || node->type->IsMin() || node->type->IsAbsMax();
 
   if (node->nan_propagate && is_minmax) {
-    CHECK(node->dst->dtype.is_float16() || node->dst->dtype.is_bfloat16(),
+    CHECK(node->dst->dtype.MatchesElementType(kDLFloat, 16) ||
+              node->dst->dtype.MatchesElementType(kDLBfloat, 16),
           ValueError)
         << "reduce_" << reduce_type
         << " with nan_propagate=True requires float16 or bfloat16 output, got "
@@ -201,12 +202,12 @@ LayoutMap ReduceOpNode::InferLayout(const LayoutInferArgs &layout_args,
     if (dst->shape.size() == src_layout->InputShape().size()) {
       // Keeping the reduced axis requires its extent to be one.
       expected_shape = src_layout->InputShape();
-      expected_shape.Set(dim, make_const(expected_shape[dim].dtype(), 1));
+      expected_shape.Set(dim, MakeConst(expected_shape[dim].ty(), 1));
     }
     bool valid_shape = dst->shape.size() == expected_shape.size();
     for (size_t i = 0; valid_shape && i < expected_shape.size(); ++i) {
-      valid_shape =
-          layout_args.analyzer->CanProveEqual(dst->shape[i], expected_shape[i]);
+      valid_shape = (*layout_args.analyzer)
+                        ->CanProveEqual(dst->shape[i], expected_shape[i]);
     }
     ICHECK(valid_shape) << "ReduceOp: invalid destination shape " << dst->shape
                         << " for " << dst << ", expected " << expected_shape
@@ -227,8 +228,8 @@ LayoutMap ReduceOpNode::InferLayout(const LayoutInferArgs &layout_args,
     arith::Analyzer analyzer;
     auto indices = InputPlaceholders(reducer_layout->InputDim());
     for (size_t i = 0; i < indices.size(); i++) {
-      analyzer.Bind(Downcast<Var>(indices[i]),
-                    Range(0, reducer_layout->InputShape()[i]));
+      analyzer->Bind(Downcast<PrimVar>(indices[i]),
+                     Range(0, reducer_layout->InputShape()[i]));
     }
     if (!ProveFragmentContains(orig_dst_layout, reducer_layout, indices,
                                indices, analyzer)) {
@@ -249,7 +250,7 @@ LayoutMap ReduceOpNode::InferLayout(const LayoutInferArgs &layout_args,
 TIR_REGISTER_TL_TILE_OP(ReduceOp, reduce)
     .set_num_inputs(4)
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque));
+                               static_cast<int64_t>(CallEffectKind::kOpaque));
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   ReduceOpNode::RegisterReflection();

@@ -29,12 +29,12 @@ using namespace ffi;
  */
 class CopyNode : public TileOperatorNode {
 public:
-  Buffer src, dst;                   // Source and destination buffers
+  BufferVar src, dst;                // Source and destination buffers
   Array<Range> src_range, dst_range; // Ranges for each dimension in src and dst
   Optional<PrimExpr> dst_block;      // Destination block index for cluster copy
   // Annotated source OOB fallback value resolved from the enclosing block.
   Optional<PrimExpr> src_oob_safe_value;
-  Map<String, ObjectRef> annotations; // Backend/pass-specific annotations.
+  Map<String, Any> annotations; // Backend/pass-specific annotations.
   // Common SIMT annotation keys:
   //   - "coalesced_width": IntImm, width for coalesced memory access.
   //   - "dst_block": PrimExpr, destination CTA rank for cluster copy.
@@ -121,7 +121,7 @@ protected:
   /**
    * \brief Constructor.
    * \param args Expression arguments for the Im2Col operator.
-   * \param vmap Buffer variable mapping.
+   * \param vmap BufferVar variable mapping.
    */
 
   /**
@@ -160,8 +160,8 @@ public:
    * \param args  Expression arguments for the copy.
    * \param annotations  Annotations map from the Call node.
    */
-  TVM_DLL Copy(Array<PrimExpr> args,
-               Map<String, ObjectRef> annotations = Map<String, ObjectRef>());
+  TVM_DLL Copy(Array<Expr> args,
+               Map<String, Any> annotations = Map<String, Any>());
 
   /*!
    * \brief Get the TVM Op handle corresponding to this Copy op.
@@ -178,7 +178,7 @@ public:
 class Im2ColOpNode : public TileOperatorNode {
 public:
   BufferRegion srcRegion_, dstRegion_;
-  Buffer src_,
+  BufferVar src_,
       dst_;      // Source (input feature map) and destination (im2col matrix)
   int stride_;   // Stride for convolution
   int padding_;  // Padding amount
@@ -187,7 +187,7 @@ public:
   int eviction_policy_ = 0;            // Cache eviction policy (annotation)
   PrimExpr nhw_step_;                  // Step size in NHW dimensions
   PrimExpr c_step_;                    // Step size in channel dimension
-  Map<String, ObjectRef> annotations_; // Annotations from Call node
+  Map<String, Any> annotations_;       // Annotations from Call node
 
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tl.Im2Col", Im2ColOpNode,
                                     TileOperatorNode);
@@ -241,8 +241,7 @@ public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Im2ColOp, TileOperator,
                                              Im2ColOpNode);
   TVM_DLL
-  Im2ColOp(Array<PrimExpr> args,
-           Map<String, ObjectRef> annotations = Map<String, ObjectRef>());
+  Im2ColOp(Array<Expr> args, Map<String, Any> annotations = Map<String, Any>());
   static const Op &Get();
 };
 

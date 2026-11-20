@@ -69,9 +69,8 @@ public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(AtomicAdd, TileOperator,
                                              AtomicAddNode);
   TVM_DLL
-  AtomicAdd(ffi::Array<PrimExpr> args,
-            ffi::Map<ffi::String, ffi::ObjectRef> annotations =
-                ffi::Map<ffi::String, ffi::ObjectRef>());
+  AtomicAdd(ffi::Array<Expr> args, ffi::Map<ffi::String, ffi::Any> annotations =
+                                       ffi::Map<ffi::String, ffi::Any>());
   static const Op &Get();
 };
 
