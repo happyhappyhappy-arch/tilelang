@@ -3,7 +3,6 @@
  * \brief HIP intrinsic rules.
  */
 #include "support/check.h"
-#include <tvm/ir/cast.h>
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/op_attr_types.h>
 
@@ -28,22 +27,23 @@ template <typename T, bool dtype_from_arg = false>
 inline PrimExpr DispatchPureExternScalarized(const PrimExpr &e) {
   const CallNode *call = e.as<CallNode>();
   ICHECK(call != nullptr);
-  DataType dtype = dtype_from_arg ? call->args[0].dtype() : call->dtype;
-  if (!dtype.is_vector()) {
+  PrimType dtype =
+      dtype_from_arg ? call->args[0].as_or_throw<PrimExpr>().ty() : e.ty();
+  if (dtype.IsScalar()) {
     return DispatchPureExtern<T, dtype_from_arg>(e);
   }
   const OpNode *op = call->op.as<OpNode>();
   ICHECK(op != nullptr);
-  std::string name = T()(dtype.element_of(), op->name.substr(5));
+  std::string name = T()(dtype.WithLanes(1), op->name.substr(5));
   if (name.empty()) {
     return e;
   }
-  ffi::Array<PrimExpr> new_args = {StringImm(name)};
+  ffi::Array<Expr> new_args = {prim::StringImm(name)};
   for (const auto &arg : call->args) {
     new_args.push_back(arg);
   }
-  return Call(call->dtype, builtin::call_pure_extern(), new_args,
-              call->annotations);
+  return Call(e.ty(), builtin::call_pure_extern(), new_args, call->attrs)
+      .as_or_throw<PrimExpr>();
 }
 
 // Lowers the explicit fast-math ops (T.__exp, etc.) to HIP's fast
@@ -55,21 +55,21 @@ template <typename T> inline PrimExpr DispatchFastMath(const PrimExpr &e) {
   const OpNode *op = call->op.as<OpNode>();
   ICHECK(op != nullptr);
   ICHECK_EQ(op->name.substr(0, 5), "tl.__");
-  std::string name = T()(call->dtype.element_of(), op->name.substr(5));
+  std::string name = T()(e.ty().WithLanes(1), op->name.substr(5));
   if (name.empty()) {
     return e;
   }
-  ffi::Array<PrimExpr> new_args = {StringImm(name)};
+  ffi::Array<Expr> new_args = {prim::StringImm(name)};
   for (const auto &arg : call->args) {
     new_args.push_back(arg);
   }
-  return Call(call->dtype, builtin::call_pure_extern(), new_args,
-              call->annotations);
+  return Call(e.ty(), builtin::call_pure_extern(), new_args, call->attrs)
+      .as_or_throw<PrimExpr>();
 }
 
 struct HIPMath {
-  std::string operator()(DataType t, std::string name) const {
-    if (t.is_float()) {
+  std::string operator()(const PrimType &t, std::string name) const {
+    if (t.MatchesCode(kDLFloat)) {
       // Match TIR's ties-to-even constant folding, not C99 round's ties-away.
       if (name == "round" && (t.bits() == 32 || t.bits() == 64)) {
         name = "nearbyint";
@@ -91,7 +91,7 @@ struct HIPMath {
       default:
         return "";
       }
-    } else if (t.is_bfloat16()) {
+    } else if ((t.MatchesCode(kDLBfloat) && t.bits() == 16)) {
       if (name == "fabs") {
         return "__habs";
       } else if (name == "round") {
@@ -99,7 +99,7 @@ struct HIPMath {
       } else {
         return "h" + name;
       }
-    } else if (t.is_int() || t.is_uint()) {
+    } else if (t.MatchesCode(kDLInt) || t.MatchesCode(kDLUInt)) {
       switch (t.bits()) {
       case 32:
         return "__" + name;
@@ -114,8 +114,8 @@ struct HIPMath {
 };
 
 struct HIPFastMath : public HIPMath {
-  std::string operator()(DataType t, std::string name) const {
-    if (t.is_float() && t.bits() == 32) {
+  std::string operator()(const PrimType &t, std::string name) const {
+    if (t.MatchesCode(kDLFloat) && t.bits() == 32) {
       return "__" + name + 'f';
     } else {
       return HIPMath::operator()(t, name);
@@ -125,8 +125,8 @@ struct HIPFastMath : public HIPMath {
 };
 
 struct HIPFastMathTan : public HIPMath {
-  std::string operator()(DataType t, std::string name) const {
-    if (t.is_float()) {
+  std::string operator()(const PrimType &t, std::string name) const {
+    if (t.MatchesCode(kDLFloat)) {
       switch (t.bits()) {
       case 64:
         return name;
@@ -143,8 +143,8 @@ struct HIPFastMathTan : public HIPMath {
 };
 
 struct HIPPopcount {
-  std::string operator()(DataType t, std::string name) const {
-    if (t.is_uint()) {
+  std::string operator()(const PrimType &t, std::string name) const {
+    if (t.MatchesCode(kDLUInt)) {
       switch (t.bits()) {
       case 32:
         return "__popc";
@@ -159,7 +159,7 @@ struct HIPPopcount {
 };
 
 struct HIPWarpIntrinsic {
-  const Op operator()(DataType t, const Op &orig_op) const {
+  const Op operator()(const PrimType &t, const Op &orig_op) const {
     if (orig_op.same_as(builtin::tvm_warp_shuffle())) {
       return Op::Get("tirx.hip.__shfl_sync");
     } else if (orig_op.same_as(builtin::tvm_warp_shuffle_up())) {
@@ -174,7 +174,8 @@ struct HIPWarpIntrinsic {
 static PrimExpr DispatchHIPWarpActiveMask(const PrimExpr &e) {
   const CallNode *call = e.as<CallNode>();
   ICHECK(call != nullptr);
-  return Call(call->dtype, Op::Get("tirx.hip.__activemask"), {});
+  return Call(e.ty(), Op::Get("tirx.hip.__activemask"), {})
+      .as_or_throw<PrimExpr>();
 }
 
 template <typename T> static PrimExpr DispatchHIPShuffle(const PrimExpr &e) {
@@ -182,9 +183,10 @@ template <typename T> static PrimExpr DispatchHIPShuffle(const PrimExpr &e) {
   const CallNode *call = e.as<CallNode>();
   ICHECK(call != nullptr);
   ICHECK_EQ(call->args.size(), 5); // mask, value, warp_id, width, warp_size
-  ffi::Array<PrimExpr> hip_args{
+  ffi::Array<Expr> hip_args{
       {call->args[0], call->args[1], call->args[2], call->args[3]}};
-  return Call(call->dtype, T()(call->dtype, Downcast<Op>(call->op)), hip_args);
+  return Call(e.ty(), T()(e.ty(), call->op.as_or_throw<Op>()), hip_args)
+      .as_or_throw<PrimExpr>();
   // NOLINTEND(clang-analyzer-cplusplus.InnerPointer)
 }
 
@@ -347,7 +349,7 @@ TVM_REGISTER_OP("tirx.hip.__shfl_sync")
                   "The warp thread width, must be a power of 2.")
     .set_attr<TGlobalSymbol>("TGlobalSymbol", "__shfl_sync")
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque))
+                               static_cast<int64_t>(CallEffectKind::kOpaque))
     .set_attr<bool>("hip.need_warp_shuffle", true);
 
 TVM_REGISTER_OP("tirx.hip.__shfl_up_sync")
@@ -359,7 +361,7 @@ TVM_REGISTER_OP("tirx.hip.__shfl_up_sync")
                   "The warp thread width, must be a power of 2.")
     .set_attr<TGlobalSymbol>("TGlobalSymbol", "__shfl_up_sync")
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque))
+                               static_cast<int64_t>(CallEffectKind::kOpaque))
     .set_attr<bool>("hip.need_warp_shuffle", true);
 
 TVM_REGISTER_OP("tirx.hip.__shfl_down_sync")
@@ -372,14 +374,14 @@ TVM_REGISTER_OP("tirx.hip.__shfl_down_sync")
                   "The warp thread width, must be a power of 2.")
     .set_attr<TGlobalSymbol>("TGlobalSymbol", "__shfl_down_sync")
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kOpaque))
+                               static_cast<int64_t>(CallEffectKind::kOpaque))
     .set_attr<bool>("hip.need_warp_shuffle", true);
 
 TVM_REGISTER_OP("tirx.hip.__activemask")
     .set_num_inputs(0)
     .set_attr<TGlobalSymbol>("TGlobalSymbol", "__activemask")
     .set_attr<TCallEffectKind>("TCallEffectKind",
-                               Integer(CallEffectKind::kPure))
+                               static_cast<int64_t>(CallEffectKind::kPure))
     .set_attr<bool>("hip.need_warp_shuffle", true);
 
 } // namespace intrin

@@ -2,9 +2,7 @@
  * \file intrin_rule_ascend.cc
  * \brief Ascend intrinsic rules for math functions.
  *
- * The default FloatSuffix lowering uses exact dtype matching
- * (t == DataType::Float(32)) which fails for vectorized types.
- * AscendMath uses t.is_float() like CUDAMath to support any lane count.
+ * Select the external math symbol by element type for scalar and vector calls.
  *
  * Registered with "ascend.FLowerIntrinsic" for the split Ascend backend.
  */
@@ -20,8 +18,8 @@ namespace intrin {
 using tirx::FLowerIntrinsic;
 
 struct AscendMath {
-  std::string operator()(DataType t, std::string name) const {
-    if (t.is_float()) {
+  std::string operator()(const PrimType &t, std::string name) const {
+    if (t.MatchesCode(kDLFloat)) {
       switch (t.bits()) {
       case 64:
         return name;

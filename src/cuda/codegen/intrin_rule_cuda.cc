@@ -3,7 +3,6 @@
  * \brief CUDA intrinsic rules.
  */
 #include "support/check.h"
-#include <tvm/ir/cast.h>
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/op_attr_types.h>
@@ -17,9 +16,9 @@ namespace intrin {
 using tirx::FLowerIntrinsic;
 using namespace ffi;
 
-struct CUDAMath {
-  std::string operator()(DataType t, std::string name) const {
-    if (t.is_float()) {
+struct TileLangCUDAMath {
+  std::string operator()(const PrimType &t, std::string name) const {
+    if (t.MatchesCode(kDLFloat)) {
       switch (t.bits()) {
       case 64:
         return name;
@@ -37,7 +36,7 @@ struct CUDAMath {
       default:
         return "";
       }
-    } else if (t.is_bfloat16()) {
+    } else if ((t.MatchesCode(kDLBfloat) && t.bits() == 16)) {
       if (name == "fabs") {
         return "__habs";
       } else if (name == "round") {
@@ -45,7 +44,7 @@ struct CUDAMath {
       } else {
         return "h" + name;
       }
-    } else if (t.is_int() || t.is_uint()) {
+    } else if (t.MatchesCode(kDLInt) || t.MatchesCode(kDLUInt)) {
       switch (t.bits()) {
       case 32:
         return "__" + name;
@@ -59,76 +58,29 @@ struct CUDAMath {
   }
 };
 
-struct CUDAFastMath : public CUDAMath {
-  std::string operator()(DataType t, std::string name) const {
-    if (t.is_float() && t.bits() == 32) {
-      return "__" + name + 'f';
-    } else {
-      return CUDAMath::operator()(t, name);
-    }
-    return "";
-  }
-};
-
-struct CUDAFastMathTan : public CUDAMath {
-  std::string operator()(DataType t, std::string name) const {
-    if (t.is_float()) {
-      switch (t.bits()) {
-      case 64:
-        return name;
-      // `__tanf` seems to produce some values too deviant from numpy tan
-      // version. So, let's use just `tanf` instead.
-      case 32:
-        return name + 'f';
-      case 16:
-        return 'h' + name;
-      default:
-        return "";
-      }
-    }
-    return "";
-  }
-};
-
 static PrimExpr DispatchCUDAPopcount(const PrimExpr &e) {
   const auto *call = e.as<CallNode>();
   ICHECK(call != nullptr);
   ICHECK_EQ(call->args.size(), 1U);
-  DataType dtype = call->args[0].dtype();
+  PrimType dtype = call->args[0].as_or_throw<PrimExpr>().ty();
   const int bits = dtype.bits();
-  if ((!dtype.is_int() && !dtype.is_uint()) ||
+  if ((!dtype.MatchesCode(kDLInt) && !dtype.MatchesCode(kDLUInt)) ||
       (bits != 8 && bits != 16 && bits != 32 && bits != 64)) {
     return e;
   }
 
   // Preserve the original bit width before widening: int8(-1) has 8 set bits.
-  PrimExpr arg = cast(DataType::UInt(bits, dtype.lanes()), call->args[0]);
+  PrimExpr arg = cast(PrimType::UInt(bits, dtype.lanes()),
+                      call->args[0].as_or_throw<PrimExpr>());
   if (bits < 32) {
-    arg = cast(DataType::UInt(32, dtype.lanes()), arg);
+    arg = cast(PrimType::UInt(32, dtype.lanes()), arg);
   }
-  PrimExpr count = Call(
-      DataType::Int(32, dtype.lanes()), builtin::call_pure_extern(),
-      {StringImm(bits == 64 ? "__popcll" : "__popc"), arg}, call->annotations);
-  return cast(call->dtype, count);
-}
-
-struct CUDAWarpIntrinsic {
-  const Op operator()(DataType t, const Op &orig_op) const {
-    if (orig_op.same_as(builtin::tvm_warp_shuffle())) {
-      return Op::Get("tirx.cuda.__shfl_sync");
-    } else if (orig_op.same_as(builtin::tvm_warp_shuffle_up())) {
-      return Op::Get("tirx.cuda.__shfl_up_sync");
-    } else {
-      ICHECK(orig_op.same_as(builtin::tvm_warp_shuffle_down()));
-      return Op::Get("tirx.cuda.__shfl_down_sync");
-    }
-  }
-};
-
-static PrimExpr DispatchCUDAWarpActiveMask(const PrimExpr &e) {
-  const CallNode *call = e.as<CallNode>();
-  return Call(call->dtype, Op::Get("tirx.cuda.__activemask"), call->args,
-              call->annotations);
+  PrimExpr count =
+      Call(PrimType::Int(32, dtype.lanes()), builtin::call_pure_extern(),
+           {prim::StringImm(bits == 64 ? "__popcll" : "__popc"), arg},
+           call->attrs)
+          .as_or_throw<PrimExpr>();
+  return cast(e.ty(), count);
 }
 
 static PrimExpr DispatchCUDAIsFinite(const PrimExpr &e) {
@@ -136,78 +88,64 @@ static PrimExpr DispatchCUDAIsFinite(const PrimExpr &e) {
   ICHECK(call != nullptr);
   ICHECK_EQ(call->args.size(), 1U);
 
-  DataType arg_dtype = call->args[0].dtype();
-  if (arg_dtype.is_float() &&
+  PrimType arg_dtype = call->args[0].as_or_throw<PrimExpr>().ty();
+  if (arg_dtype.MatchesCode(kDLFloat) &&
       (arg_dtype.bits() == 32 || arg_dtype.bits() == 64)) {
-    Array<PrimExpr> new_args = {StringImm("isfinite"), call->args[0]};
-    return Call(call->dtype, builtin::call_pure_extern(), new_args,
-                call->annotations);
+    Array<Expr> new_args = {prim::StringImm("isfinite"), call->args[0]};
+    return Call(e.ty(), builtin::call_pure_extern(), new_args, call->attrs)
+        .as_or_throw<PrimExpr>();
   }
 
   return e;
-}
-
-template <typename T> static PrimExpr DispatchCUDAShuffle(const PrimExpr &e) {
-  const CallNode *call = e.as<CallNode>();
-  ICHECK(call != nullptr);
-  ICHECK_EQ(call->args.size(), 5); // mask, value, warp_id, width, warp_size
-  Array<PrimExpr> cuda_args{
-      {call->args[0], call->args[1], call->args[2], call->args[3]}};
-  return Call(call->dtype, T()(call->dtype, Downcast<Op>(call->op)), cuda_args,
-              call->annotations);
 }
 
 TVM_REGISTER_OP("tirx.popcount")
     .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic", DispatchCUDAPopcount,
                                11);
 
-TVM_REGISTER_OP("tirx.rsqrt")
-    .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic",
-                               DispatchPureExtern<CUDAMath>);
-
 TVM_REGISTER_OP("tirx.asin")
     .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic",
-                               DispatchPureExtern<CUDAMath>);
+                               DispatchPureExtern<TileLangCUDAMath>);
 
 TVM_REGISTER_OP("tirx.acos")
     .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic",
-                               DispatchPureExtern<CUDAMath>);
+                               DispatchPureExtern<TileLangCUDAMath>);
 
 TVM_REGISTER_OP("tirx.asinh")
     .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic",
-                               DispatchPureExtern<CUDAMath>);
+                               DispatchPureExtern<TileLangCUDAMath>);
 
 TVM_REGISTER_OP("tirx.acosh")
     .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic",
-                               DispatchPureExtern<CUDAMath>);
+                               DispatchPureExtern<TileLangCUDAMath>);
 
 TVM_REGISTER_OP("tirx.atanh")
     .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic",
-                               DispatchPureExtern<CUDAMath>);
+                               DispatchPureExtern<TileLangCUDAMath>);
 
 TVM_REGISTER_OP("tirx.log1p")
     .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic",
-                               DispatchPureExtern<CUDAMath>);
+                               DispatchPureExtern<TileLangCUDAMath>);
 
 TVM_REGISTER_OP("tirx.atan2")
     .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic",
-                               DispatchPureExtern<CUDAMath>);
+                               DispatchPureExtern<TileLangCUDAMath>);
 
 TVM_REGISTER_OP("tirx.hypot")
     .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic",
-                               DispatchPureExtern<CUDAMath>);
+                               DispatchPureExtern<TileLangCUDAMath>);
 
 TVM_REGISTER_OP("tirx.copysign")
     .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic",
-                               DispatchPureExtern<CUDAMath>);
+                               DispatchPureExtern<TileLangCUDAMath>);
 
 TVM_REGISTER_OP("tirx.ldexp")
     .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic",
-                               DispatchPureExtern<CUDAMath>);
+                               DispatchPureExtern<TileLangCUDAMath>);
 
 TVM_REGISTER_OP("tirx.nextafter")
     .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic",
-                               DispatchPureExtern<CUDAMath>);
+                               DispatchPureExtern<TileLangCUDAMath>);
 
 TVM_REGISTER_OP("tirx.isfinite")
     .set_attr<FLowerIntrinsic>("cuda.FLowerIntrinsic", DispatchCUDAIsFinite);

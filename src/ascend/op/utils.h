@@ -28,22 +28,22 @@ class GemmBlockScaled;
 void ValidateL0SFGemm(const GemmBlockScaled &gemm, const L0SFBindings &bindings,
                       arith::Analyzer *analyzer);
 
-inline bool IsSSBuffer(const Buffer &buffer) {
+inline bool IsSSBuffer(const BufferVar &buffer) {
   return buffer.defined() &&
          (buffer.scope() == "shared.ss" || buffer.scope() == "shared.ss.dyn");
 }
 
-inline bool IsL1Buffer(const Buffer &buffer) {
+inline bool IsL1Buffer(const BufferVar &buffer) {
   return buffer.defined() &&
          (buffer.scope() == "shared.l1" || buffer.scope() == "shared.l1.dyn");
 }
 
-inline bool IsL0ABuffer(const Buffer &buffer) {
+inline bool IsL0ABuffer(const BufferVar &buffer) {
   return buffer.defined() &&
          (buffer.scope() == "shared.l0a" || buffer.scope() == "shared.l0a.dyn");
 }
 
-inline bool IsL0BBuffer(const Buffer &buffer) {
+inline bool IsL0BBuffer(const BufferVar &buffer) {
   return buffer.defined() &&
          (buffer.scope() == "shared.l0b" || buffer.scope() == "shared.l0b.dyn");
 }
@@ -53,24 +53,24 @@ inline bool IsL0BBuffer(const Buffer &buffer) {
 // the hardware keys the slots to the bound data tile's address — so every
 // allocation accounting excludes them by scope. Versioning and address reuse
 // group them with their data tile; logical access analysis keeps them separate.
-inline bool IsL0ASFBuffer(const Buffer &buffer) {
+inline bool IsL0ASFBuffer(const BufferVar &buffer) {
   return buffer.defined() && buffer.scope() == "shared.l0a.sf";
 }
 
-inline bool IsL0BSFBuffer(const Buffer &buffer) {
+inline bool IsL0BSFBuffer(const BufferVar &buffer) {
   return buffer.defined() && buffer.scope() == "shared.l0b.sf";
 }
 
-inline bool IsL0SFBuffer(const Buffer &buffer) {
+inline bool IsL0SFBuffer(const BufferVar &buffer) {
   return IsL0ASFBuffer(buffer) || IsL0BSFBuffer(buffer);
 }
 
-inline bool IsL0CBuffer(const Buffer &buffer) {
+inline bool IsL0CBuffer(const BufferVar &buffer) {
   return buffer.defined() &&
          (buffer.scope() == "shared.l0c" || buffer.scope() == "shared.l0c.dyn");
 }
 
-inline bool IsAscendOnChipBuffer(const Buffer &buffer) {
+inline bool IsAscendOnChipBuffer(const BufferVar &buffer) {
   return IsSharedBuffer(buffer) || IsL1Buffer(buffer) || IsL0ABuffer(buffer) ||
          IsL0BBuffer(buffer) || IsL0CBuffer(buffer) || IsSSBuffer(buffer);
 }
@@ -89,16 +89,17 @@ inline bool IsAscendOnChipBuffer(const Buffer &buffer) {
  * Keep the Buffer identity until layout lowering: a data Var alone cannot
  * identify which canonical matrix view supplies the physical addresses.
  */
-inline PrimExpr MakeAscendLeadingDimAccessPtr(const BufferRegion &region,
-                                              int rw_mask) {
+inline Expr MakeAscendLeadingDimAccessPtr(const BufferRegion &region,
+                                          int rw_mask) {
   // ffi::Array is copy-on-write, so Set() here does not disturb the caller.
   auto leading = region->region;
   int n = static_cast<int>(leading.size());
+  ICHECK_GT(n, 0) << "DMA access requires a nonempty shape";
   // Only a region with at least two dims has an inner 2-D position to separate.
   // A 1-D region keeps the neutral behaviour, where the min *is* the offset.
   for (int i = std::max(0, n - 2); n >= 2 && i < n; ++i) {
     const auto &r = leading[i];
-    leading.Set(i, Range::FromMinExtent(make_zero(r->min.dtype()), r->extent));
+    leading.Set(i, Range::FromMinExtent(MakeConst(r->min.ty(), 0), r->extent));
   }
   ffi::Array<PrimExpr> indices;
   for (const Range &range : leading)
@@ -106,9 +107,9 @@ inline PrimExpr MakeAscendLeadingDimAccessPtr(const BufferRegion &region,
   PrimExpr extent = leading.back()->extent;
   if (n >= 2)
     extent = extent * leading[n - 2]->extent;
-  return Call(DataType::Handle(), tl::access_ptr(),
-              {BufferLoad(region->buffer, indices), extent,
-               IntImm(DataType::Int(32), rw_mask)});
+  return Call(
+      PointerType(PrimType::Void(), region->buffer.scope()), tl::access_ptr(),
+      {BufferLoad(region->buffer, indices), extent, IntImm::Int32(rw_mask)});
 }
 
 } // namespace tl
